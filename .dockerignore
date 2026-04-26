@@ -1,0 +1,6 @@
+build/
+data/
+.cache/
+*.log
+*.wal
+.git/
