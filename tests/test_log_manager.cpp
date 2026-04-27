@@ -110,3 +110,59 @@ TEST(LogManagerTest, PersistAcrossReopen) {
 
     std::filesystem::remove(path);
 }
+
+TEST(LogManagerTest, TailPartialTruncatedOnReopen) {
+    const std::string path = temp_path("tail_partial");
+    std::filesystem::remove(path);
+
+    {
+        lumina::LogManager log(path);
+        ASSERT_TRUE(log.open().ok());
+        ASSERT_TRUE(log.append(lumina::OpType::kPut, "ok", "v", nullptr).ok());
+        ASSERT_TRUE(log.sync().ok());
+    }
+    {
+        std::fstream fs(path, std::ios::binary | std::ios::in | std::ios::out | std::ios::ate);
+        ASSERT_TRUE(fs.is_open());
+        const char junk[] = {0, 1, 2, 3};
+        fs.write(junk, sizeof(junk));
+    }
+
+    lumina::LogManager log2(path);
+    ASSERT_TRUE(log2.open().ok());
+    size_t n = 0;
+    ASSERT_TRUE(log2.iterate([&](const lumina::WalEntry& e) {
+        EXPECT_EQ(e.key, "ok");
+        EXPECT_EQ(e.value, "v");
+        ++n;
+        return true;
+    }).ok());
+    EXPECT_EQ(n, 1U);
+
+    std::filesystem::remove(path);
+}
+
+TEST(LogManagerTest, MiddleCorruptionRejectsOpen) {
+    const std::string path = temp_path("middle");
+    std::filesystem::remove(path);
+
+    {
+        lumina::LogManager log(path);
+        ASSERT_TRUE(log.open().ok());
+        ASSERT_TRUE(log.append(lumina::OpType::kPut, "a", "1", nullptr).ok());
+        ASSERT_TRUE(log.append(lumina::OpType::kPut, "b", "2", nullptr).ok());
+        ASSERT_TRUE(log.sync().ok());
+    }
+    {
+        std::fstream fs(path, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(fs.is_open());
+        fs.seekp(12);
+        const char b = 0xAB;
+        fs.write(&b, 1);
+    }
+
+    lumina::LogManager log2(path);
+    const auto s = log2.open();
+    EXPECT_TRUE(s.IsCorruption());
+    std::filesystem::remove(path);
+}

@@ -97,8 +97,17 @@ struct Options {
     // HNSW graph file path (for persistence)
     std::string hnsw_path = "lumina.hnsw";
 
-    // Whether to call fsync after every write (safer but slower)
+    // When false, engine never fsyncs (caller must use sync()).
+    // When true and group_commit is false, fsync after each mutating op (if sync writes enabled).
     bool sync_writes = true;
+
+    // If true, do not fsync on each put/remove unless:
+    //   - sync_every_n_appends > 0 and the counter reaches N, or
+    //   - StorageEngine::sync() is called explicitly.
+    bool group_commit = false;
+
+    // When group_commit and value > 0, fsync every N appends. When 0, only manual sync().
+    size_t sync_every_n_appends = 0;
 
     // Vector dimensionality
     size_t vector_dim = 128;

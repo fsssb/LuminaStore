@@ -103,3 +103,32 @@ TEST(StorageEngineTest, GetNonExistent) {
 
     std::filesystem::remove(path);
 }
+
+TEST(StorageEngineTest, GroupCommitFsyncsEveryN) {
+    const std::string path = temp_wal("group");
+    std::filesystem::remove(path);
+
+    lumina::Options opts;
+    opts.wal_path              = path;
+    opts.sync_writes           = true;
+    opts.group_commit          = true;
+    opts.sync_every_n_appends  = 2;
+
+    {
+        lumina::StorageEngine eng(opts);
+        ASSERT_TRUE(eng.open().ok());
+        ASSERT_TRUE(eng.put("a", "1").ok());
+        ASSERT_TRUE(eng.put("b", "2").ok());
+    }
+
+    {
+        lumina::StorageEngine again(opts);
+        ASSERT_TRUE(again.open().ok());
+        std::string v;
+        ASSERT_TRUE(again.get("a", &v).ok());
+        EXPECT_EQ(v, "1");
+        ASSERT_TRUE(again.get("b", &v).ok());
+        EXPECT_EQ(v, "2");
+    }
+    std::filesystem::remove(path);
+}

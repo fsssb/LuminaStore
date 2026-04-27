@@ -4,6 +4,27 @@
 #include <utility>
 
 namespace lumina {
+namespace {
+
+Status maybe_fsync_after_append(const Options& o, size_t& appends_since, LogManager& log) {
+    if (!o.sync_writes) {
+        return Status::OK();
+    }
+    if (!o.group_commit) {
+        return log.sync();
+    }
+    if (o.sync_every_n_appends == 0) {
+        return Status::OK();
+    }
+    ++appends_since;
+    if (appends_since < o.sync_every_n_appends) {
+        return Status::OK();
+    }
+    appends_since = 0;
+    return log.sync();
+}
+
+}  // namespace
 
 StorageEngine::StorageEngine(Options opts)
     : opts_(std::move(opts)), log_(opts_.wal_path) {}
@@ -13,6 +34,7 @@ StorageEngine::~StorageEngine() = default;
 Status StorageEngine::open() {
     {
         std::unique_lock<std::shared_mutex> lock(mutex_);
+        appends_since_group_sync_ = 0;
         const Status s = log_.open();
         if (!s.ok()) {
             return s;
@@ -31,11 +53,9 @@ Status StorageEngine::put(const Slice& key, const Slice& value) {
     }
 
     index_.put(key.ToString(), offset);
-    if (opts_.sync_writes) {
-        s = log_.sync();
-        if (!s.ok()) {
-            return s;
-        }
+    s = maybe_fsync_after_append(opts_, appends_since_group_sync_, log_);
+    if (!s.ok()) {
+        return s;
     }
     return Status::OK();
 }
@@ -50,11 +70,9 @@ Status StorageEngine::put_vector(const Slice& key, const Slice& value) {
     }
 
     index_.put(key.ToString(), offset);
-    if (opts_.sync_writes) {
-        s = log_.sync();
-        if (!s.ok()) {
-            return s;
-        }
+    s = maybe_fsync_after_append(opts_, appends_since_group_sync_, log_);
+    if (!s.ok()) {
+        return s;
     }
     return Status::OK();
 }
@@ -94,11 +112,9 @@ Status StorageEngine::remove(const Slice& key) {
     }
 
     index_.remove(key.ToString());
-    if (opts_.sync_writes) {
-        s = log_.sync();
-        if (!s.ok()) {
-            return s;
-        }
+    s = maybe_fsync_after_append(opts_, appends_since_group_sync_, log_);
+    if (!s.ok()) {
+        return s;
     }
     return Status::OK();
 }
@@ -118,7 +134,8 @@ Status StorageEngine::recover() {
 }
 
 Status StorageEngine::sync() {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    appends_since_group_sync_ = 0;
     return log_.sync();
 }
 

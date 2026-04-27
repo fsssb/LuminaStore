@@ -48,6 +48,7 @@ private:
     LogManager         log_;
     IndexManager       index_;
     mutable std::shared_mutex mutex_;
+    size_t            appends_since_group_sync_ = 0;
 };
 
 } // namespace lumina
