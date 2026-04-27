@@ -47,6 +47,9 @@ public:
     // Callback receives each entry; return false to stop early.
     Status iterate(std::function<bool(const WalEntry&)> cb) const;
 
+    // Read and decode a full WAL frame at byte offset.
+    Status read_value_at(uint64_t offset, std::string* out_key, std::string* out_value) const;
+
     // Current end-of-file offset (next write position).
     uint64_t size() const;
 

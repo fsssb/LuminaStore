@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <cstddef>
 
@@ -49,6 +50,3 @@ inline uint32_t crc32_combine(const void* a, size_t a_len,
 }
 
 } // namespace lumina
-
-// Required for the static lambda inside crc32()
-#include <array>
