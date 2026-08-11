@@ -23,6 +23,19 @@ cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DLUMINA_ENABLE_ASAN=ON
 cmake --build build-asan -j
 ```
 
+If you build the AVX-512F translation unit on x86 but want to **exclude** the AVX-512 *dispatch* branch at runtime (e.g. to avoid 512-related frequency side effects, while still linking the TU), set `-DLUMINA_RUNTIME_USE_AVX512=OFF` (this sets `LUMINA_ALLOW_AVX512_KERNEL=0`).
+
+**x86 runtime dispatch order** (when the corresponding object files are built): the implementation tries **AVX2 + FMA** first, then **AVX-512F** only if the AVX2 path was not taken. On typical CPUs that expose both, **AVX2 remains selected** — AVX-512 is used mainly when AVX2 is absent or not usable. That is a conservative default; a future `LUMINA_PREFER_AVX512` (or similar) could change that policy. “Allow AVX-512 at runtime” does **not** mean “prefer AVX-512 over AVX2”.
+
+For a fully native-tuned build on your machine (optional, not portable to older CPUs of the same ISA):
+
+```bash
+cmake -S . -B build-native -DLUMINA_ENABLE_MARCH_NATIVE=ON
+cmake --build build-native -j
+```
+
+**SIMD 与距离函数**：实现位于 `src/vector/vector_math_scalar.cpp`（标量、运行时 CPU 能力检测与派发）及可选的 `vector_math_neon.cpp` / `vector_math_avx2.cpp` / `vector_math_avx512.cpp`（由 `cmake/DetectSIMD.cmake` 决定是否编译，并为各 TU 单独加 `-mavx2`、`-mfma`、`-mavx512f` 等标志）。x86 上默认 **先尝试 AVX2，再考虑 AVX-512**；与 “允许运行时选 AVX-512” 的 CMake 开关含义见上文英语段落。`include/lumina/vector/aligned_alloc.h` 提供 64 字节对齐的 `AlignedFloatVector`，供 HNSW 节点向量等热路径使用。
+
 ## Run Tests
 
 ```bash
@@ -87,7 +100,7 @@ In `Options`:
 ## Acceptance Checklist
 
 - Crash recovery via WAL replay
-- SIMD path selected by compile-time capability macros
+- SIMD path selected at runtime (CPUID / CPU features) with optional per-ISA object files, not only the build host
 - HNSW `add_item` and `search_top_k` available
 - Save/load for HNSW graph index
 - Unit tests and benchmark scaffolding included

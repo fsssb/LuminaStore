@@ -1,5 +1,6 @@
 #include "lumina/vector/hnsw_index.h"
 
+#include "lumina/vector/aligned_alloc.h"
 #include "lumina/vector/vector_math.h"
 
 #include <algorithm>
@@ -18,7 +19,7 @@ namespace {
 
 struct Node {
     uint64_t id = 0;
-    std::vector<float> vec;
+    AlignedFloatVector vec;
     std::vector<std::vector<size_t>> neighbors;
     int max_layer = 0;
 };
