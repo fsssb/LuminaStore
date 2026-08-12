@@ -41,14 +41,21 @@ public:
     // Flush pending writes to disk.
     Status sync();
 
+    // Write an index snapshot (key->offset table + WAL watermark) and append a
+    // MANIFEST record. Subsequent open() loads the snapshot and replays only the
+    // WAL tail after the watermark instead of scanning the whole log.
+    Status snapshot();
+
     size_t key_count() const;
 
 private:
+    Status recover_inner();
     Options            opts_;
     LogManager         log_;
     IndexManager       index_;
     mutable std::shared_mutex mutex_;
     size_t            appends_since_group_sync_ = 0;
+    uint64_t          snap_seq_counter_ = 0;
 };
 
 } // namespace lumina

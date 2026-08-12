@@ -64,6 +64,11 @@ public:
     // repaired tail-only issues).
     Status iterate(std::function<bool(const WalEntry&)> cb) const;
 
+    // Same as iterate, but starts at a frame boundary byte offset (a previous
+    // snapshot watermark). from_offset must be >= data_start and a valid frame
+    // boundary; passing a bad offset yields Corruption.
+    Status iterate_from(uint64_t from_offset, std::function<bool(const WalEntry&)> cb) const;
+
     // Read and decode a full WAL frame at byte offset (must point to frame start, not file hdr).
     Status read_value_at(uint64_t offset, std::string* out_key, std::string* out_value) const;
 

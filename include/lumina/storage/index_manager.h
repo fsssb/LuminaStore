@@ -34,6 +34,12 @@ public:
     // Erase all entries (used during recovery to rebuild from scratch).
     void clear() { map_.clear(); }
 
+    // Snapshot support: full dump of the live key->offset table.
+    const std::unordered_map<std::string, uint64_t>& dump() const { return map_; }
+
+    // Replace the whole table (used when loading a snapshot).
+    void load(std::unordered_map<std::string, uint64_t> map) { map_ = std::move(map); }
+
 private:
     std::unordered_map<std::string, uint64_t> map_;
 };

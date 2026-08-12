@@ -476,12 +476,22 @@ Status LogManager::sync() {
 }
 
 Status LogManager::iterate(std::function<bool(const WalEntry&)> cb) const {
+    return iterate_from(impl_->data_start, std::move(cb));
+}
+
+Status LogManager::iterate_from(uint64_t from_offset,
+                                std::function<bool(const WalEntry&)> cb) const {
     if (impl_->fd < 0) {
         return Status::IOError("WAL not opened");
     }
+    if (from_offset < impl_->data_start || from_offset > impl_->eof_offset) {
+        // Frame boundaries have no fixed alignment; the watermark comes from a
+        // CRC-verified snapshot written by the engine, so range checking suffices.
+        return Status::InvalidArgument("bad iterate start offset");
+    }
 
     const bool v2 = !impl_->legacy_wal;
-    uint64_t   c  = impl_->data_start;
+    uint64_t   c  = from_offset;
 
     while (c + kFrameHeaderSize <= impl_->eof_offset) {
         std::array<uint8_t, kFrameHeaderSize> fhdr{};
