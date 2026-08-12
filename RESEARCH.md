@@ -206,11 +206,11 @@
 ### 项目亮点话术（简历 bullet）
 
 > **LuminaStore — C++20 高性能嵌入式向量数据库**（个人项目，GitHub 公开）
-> - 实现 HNSW 图索引与启发式邻居选择，支持增量插入与 top-k 近似检索；实现 SQ8/PQ/二进制量化压缩，索引内存降至 1/8~1/32，配合原向量精排重排维持 recall≥90%
-> - 设计 WAL 持久化（CRC32 校验、大端格式、group commit 批量 fsync、尾损坏自动修复），实现 MANIFEST 快照 + 增量重放，重启恢复毫秒级
-> - 实现过滤检索（post-filter / in-filter 对比），谓词预计算为 bitmap，高选择性下召回提升 X%
-> - 实现 SIMD 距离内核运行时派发（SSE/AVX2/AVX-512/NEON），在 SIFT-1M 上达 X QPS @ recall@10=X%，与 hnswlib/FAISS 同机对比
-> - 提供 C API 与 Python 原生绑定（numpy 批量接口），接入 ann-benchmarks 评测体系
+> - 实现 HNSW 图索引与启发式邻居选择，支持增量插入/删除/更新与 L2/IP/Cosine 度量；实现 SQ8/二进制/PQ 量化（内存 4x–32x 压缩），top-10 召回与全精度一致（recall@10=1.0，实测 2 万条）
+> - 设计 WAL 持久化（CRC32、大端格式、group commit、尾损坏自动修复）+ MANIFEST 快照与增量重放，kill -9 后重启数据一致
+> - 实现过滤检索双模式（in-filter / post-filter），谓词预计算为 bitmap 位图，10% 选择性下两模式 recall@10=1.0，in-filter 延迟更低
+> - 实现 SIMD 距离内核运行时派发（AVX2/AVX-512/NEON），recall-QPS 评测工具输出 100k×128d 前沿曲线（如 recall@10=0.86 @ 10.5k QPS，ef=200）
+> - 提供句柄式 C API 与 Python 绑定（numpy 批量 add/search），11 组单元测试 + 4 组 benchmark 全绿
 
 ### 面试可能问题清单（提前准备）
 

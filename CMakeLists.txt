@@ -188,3 +188,7 @@ foreach(bench_src ${BENCH_SOURCES})
     add_executable(${bench_name} ${bench_src})
     target_link_libraries(${bench_name} PRIVATE lumina_core benchmark::benchmark)
 endforeach()
+
+# ---- Tools ----
+add_executable(ann_bench tools/ann_bench.cpp)
+target_link_libraries(ann_bench PRIVATE lumina_core)
