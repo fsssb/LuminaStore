@@ -3,6 +3,7 @@
 #include "lumina/common/types.h"
 #include "lumina/engine/filter.h"
 #include "lumina/engine/query.h"
+#include "lumina/index/filter_index.h"
 #include "lumina/vector/hnsw_index.h"
 
 #include <cstddef>
@@ -51,6 +52,14 @@ public:
     // ANN top-k search.
     std::vector<SearchResult> search(const float* query, size_t k,
                                      const SearchOptions& opts = {}) const;
+
+    // Filtered ANN search. With kInFilter the predicate is checked while
+    // candidates enter the result set; with kPostFilter a plain search with
+    // oversampled ef is filtered afterwards (retrying with larger ef until k
+    // results are found or the budget is exhausted).
+    std::vector<SearchResult> search_filtered(const float* query, size_t k,
+                                              const FilterExpr& filter,
+                                              const SearchOptions& opts = {}) const;
 
     Status snapshot();
 

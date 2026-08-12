@@ -37,12 +37,12 @@ struct Collection::Impl {
     Options opts;
     std::unique_ptr<StorageEngine> storage;  // constructed after opts is configured
     HNSWIndex index;
+    FilterIndex filter_index;
     std::mutex write_mutex;  // serializes add/remove/update (WAL + graph consistency)
 
     Impl(Options o, DistanceFn dist, size_t dim)
         : opts(std::move(o)), index(dim, opts.hnsw_M, opts.hnsw_ef_construction, dist) {}
 };
-
 Collection::Collection(std::string dir, size_t dim, Metric metric, size_t M, size_t ef_construction)
     : impl_(new Impl(Options{}, pipeline::distance_for_metric(Metric::kL2), dim)), dim_(dim),
       metric_(metric) {
@@ -66,7 +66,7 @@ Status Collection::open() {
     if (!s.ok()) {
         return s;
     }
-    // Rebuild the HNSW graph from live WAL entries.
+    // Rebuild the HNSW graph and filter index from live WAL entries.
     return impl_->storage->visit_live([this](const std::string& key, const std::string& value) {
         uint64_t id = 0;
         if (!parse_id(key, &id)) {
@@ -80,7 +80,11 @@ Status Collection::open() {
         if (meta.vec.size() != dim_) {
             return false;
         }
-        return impl_->index.add_item(id, meta.vec.data()).ok();
+        if (!impl_->index.add_item(id, meta.vec.data()).ok()) {
+            return false;
+        }
+        impl_->filter_index.add(id, meta.scalars);
+        return true;
     });
 }
 
@@ -108,7 +112,12 @@ Status Collection::add(uint64_t id, const float* vec, const std::string& payload
     if (!s.ok()) {
         return s;
     }
-    return impl_->index.add_item(id, vec);
+    const Status is = impl_->index.add_item(id, vec);
+    if (!is.ok()) {
+        return is;
+    }
+    impl_->filter_index.add(id, scalars);
+    return Status::OK();
 }
 
 Status Collection::remove(uint64_t id) {
@@ -117,7 +126,9 @@ Status Collection::remove(uint64_t id) {
     if (!s.ok()) {
         return s;
     }
-    return impl_->index.remove(id);  // NotFound if absent
+    const Status rs = impl_->index.remove(id);  // NotFound if absent
+    impl_->filter_index.remove(id);
+    return rs;
 }
 
 Status Collection::update(uint64_t id, const float* vec, const std::string& payload,
@@ -144,7 +155,13 @@ Status Collection::update(uint64_t id, const float* vec, const std::string& payl
     if (!s.ok()) {
         return s;
     }
-    return impl_->index.update_item(id, vec);
+    const Status us = impl_->index.update_item(id, vec);
+    if (!us.ok()) {
+        return us;
+    }
+    impl_->filter_index.remove(id);
+    impl_->filter_index.add(id, scalars);
+    return Status::OK();
 }
 
 Status Collection::get(uint64_t id, std::string* payload) const {
@@ -171,6 +188,46 @@ std::vector<SearchResult> Collection::search(const float* query, size_t k,
         return {};
     }
     return impl_->index.search_top_k(query, k, opts.ef_search);
+}
+
+std::vector<SearchResult> Collection::search_filtered(const float* query, size_t k,
+                                                      const FilterExpr& filter,
+                                                      const SearchOptions& opts) const {
+    if (query == nullptr || k == 0) {
+        return {};
+    }
+    if (filter.empty()) {
+        return search(query, k, opts);
+    }
+
+    if (opts.filter_mode == FilterMode::kInFilter) {
+        const auto fn = [this, &filter](uint64_t id) {
+            return impl_->filter_index.matches(id, filter);
+        };
+        return impl_->index.search_top_k_filtered(query, k, opts.ef_search, fn);
+    }
+
+    // Post-filter: plain search with oversampled ef, filter, retry with a
+    // larger ef until enough results survive (or the budget is exhausted).
+    size_t ef = std::max(opts.ef_search, k * 2);
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        auto hits = impl_->index.search_top_k(query, ef, ef);
+        std::vector<SearchResult> filtered;
+        filtered.reserve(hits.size());
+        for (const auto& h : hits) {
+            if (impl_->filter_index.matches(h.id, filter)) {
+                filtered.push_back(h);
+            }
+        }
+        if (filtered.size() >= k || attempt == 3) {
+            if (filtered.size() > k) {
+                filtered.resize(k);
+            }
+            return filtered;
+        }
+        ef *= 2;
+    }
+    return {};
 }
 
 Status Collection::snapshot() {

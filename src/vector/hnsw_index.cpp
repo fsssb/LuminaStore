@@ -128,10 +128,13 @@ int random_level(HNSWIndex::Impl& d) {
     return static_cast<int>(-std::log(x) * d.ml);
 }
 
-// Greedy beam search on one layer. Skips deleted nodes. Returns candidates
-// sorted by distance ascending. Caller must hold struct_lock (shared at least).
+// Greedy beam search on one layer. Skips deleted nodes. When `filter` is
+// non-null, a candidate only enters the result set if filter(id) is true
+// (traversal still expands all neighbours). Returns candidates sorted by
+// distance ascending. Caller must hold struct_lock (shared at least).
 std::vector<Candidate> search_layer(const HNSWIndex::Impl& d, const float* query,
-                                    size_t entry_idx, size_t ef, int layer) {
+                                    size_t entry_idx, size_t ef, int layer,
+                                    const FilterFn* filter = nullptr) {
     const uint32_t stamp = next_stamp();
     if (t_visited.size() < d.nodes.size()) {
         t_visited.assign(d.nodes.size(), 0);
@@ -147,8 +150,10 @@ std::vector<Candidate> search_layer(const HNSWIndex::Impl& d, const float* query
             return {};
         }
         const float de = d.dist(query, e.vec.data(), d.dim);
-        candidates.push({de, entry_idx});
-        result.push({de, entry_idx});
+        candidates.push({de, entry_idx});  // always an expansion point
+        if (filter == nullptr || (*filter)(e.id)) {
+            result.push({de, entry_idx});
+        }
         t_visited[entry_idx] = stamp;
     }
 
@@ -156,7 +161,7 @@ std::vector<Candidate> search_layer(const HNSWIndex::Impl& d, const float* query
         const auto [cand_dist, cand_idx] = candidates.top();
         candidates.pop();
 
-        if (!result.empty() && cand_dist > result.top().first) {
+        if (result.size() >= ef && cand_dist > result.top().first) {
             break;
         }
 
@@ -186,8 +191,24 @@ std::vector<Candidate> search_layer(const HNSWIndex::Impl& d, const float* query
                 nd = d.dist(query, nb.vec.data(), d.dim);
             }
 
-            if (result.size() < ef || nd < result.top().first) {
+            // Expansion queue: never filtered, so the search can escape a
+            // region where nothing matches the filter (hnswlib behaviour).
+            if (candidates.size() < ef || nd < candidates.top().first) {
                 candidates.push({nd, nb_idx});
+            }
+
+            // Result set: filter-aware.
+            if (filter != nullptr) {
+                uint64_t nid = 0;
+                {
+                    NodeLock lk(d, nb_idx);
+                    nid = d.nodes[nb_idx].id;
+                }
+                if (!(*filter)(nid)) {
+                    continue;  // in-filter: excluded candidate skipped
+                }
+            }
+            if (result.size() < ef || nd < result.top().first) {
                 result.push({nd, nb_idx});
                 if (result.size() > ef) {
                     result.pop();
@@ -508,6 +529,12 @@ Status HNSWIndex::update_item(uint64_t id, const float* vec) {
 
 std::vector<SearchResult> HNSWIndex::search_top_k(const float* query, size_t k,
                                                   size_t ef_search) const {
+    return search_top_k_filtered(query, k, ef_search, nullptr);
+}
+
+std::vector<SearchResult> HNSWIndex::search_top_k_filtered(const float* query, size_t k,
+                                                           size_t ef_search,
+                                                           const FilterFn& filter) const {
     const auto& d = *impl_;
     std::vector<SearchResult> out;
     if (query == nullptr || k == 0 || d.entry_point.load() < 0) {
@@ -518,13 +545,13 @@ std::vector<SearchResult> HNSWIndex::search_top_k(const float* query, size_t k,
 
     size_t ep = static_cast<size_t>(d.entry_point.load());
     for (int l = d.max_layer.load(); l > 0; --l) {
-        const auto res = search_layer(d, query, ep, 1, l);
+        const auto res = search_layer(d, query, ep, 1, l, filter ? &filter : nullptr);
         if (!res.empty()) {
             ep = res.front().second;
         }
     }
 
-    auto candidates = search_layer(d, query, ep, std::max(ef_search, k), 0);
+    auto candidates = search_layer(d, query, ep, std::max(ef_search, k), 0, filter ? &filter : nullptr);
     if (candidates.size() > k) {
         candidates.resize(k);
     }
