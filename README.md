@@ -55,6 +55,16 @@ with lumina.open_collection("/tmp/db", dim=128, metric=0) as col:
 See [docs/benchmarks.md](docs/benchmarks.md) for recall-QPS curves,
 quantization and filtering numbers, and reproduction commands.
 
+![recall@10 vs QPS](docs/recall_qps.png)
+
+```mermaid
+xychart-beta
+    title "recall@10 vs QPS (MNIST 60k x 784, M=32, ef_construction=400)"
+    x-axis "recall@10" [0.97, 0.99, 0.9975, 0.999, 0.9995]
+    y-axis "QPS" 0 --> 5000
+    line [4449, 3430, 1921, 1079, 613]
+```
+
 ## On-disk formats
 
 - WAL: 8-byte file header `[LMST][version][reserved]` then frames

@@ -1,4 +1,5 @@
 #include "lumina/index/quantizer.h"
+#include "lumina/vector/quantized_distance.h"
 
 #include <algorithm>
 #include <cmath>
@@ -37,11 +38,13 @@ void ScalarQuantizer8::encode(const float* vec, QuantCode* code) const {
 
 float ScalarQuantizer8::distance_to_query(const QuantCode& code, const float* query,
                                           size_t dim) const {
-    return l2_dequant(code.bytes.data(), query, dim);
+    (void)dim;
+    return quant::sq8_l2_query(code.bytes.data(), query, dim_, min_, max_);
 }
 
 float ScalarQuantizer8::distance(const QuantCode& a, const QuantCode& b) const {
-    return l2_dequant(a.bytes.data(), b.bytes.data(), dim_);
+    const float scale = (max_ - min_) / 255.0F;
+    return quant::sq8_l2_bytes(a.bytes.data(), b.bytes.data(), dim_, scale);
 }
 
 size_t ScalarQuantizer8::code_bytes() const { return dim_; }

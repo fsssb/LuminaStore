@@ -1,4 +1,5 @@
 #include "lumina/index/quantizer.h"
+#include "lumina/vector/quantized_distance.h"
 
 #include <cstdint>
 
@@ -34,16 +35,11 @@ void BinaryQuantizer::encode(const float* vec, QuantCode* code) const {
 float BinaryQuantizer::distance_to_query(const QuantCode& code, const float* query,
                                          size_t dim) const {
     (void)dim;
-    return hamming(code.bytes, query);
+    return quant::binary_hamming_query(code.bytes.data(), query, dim_);
 }
 
 float BinaryQuantizer::distance(const QuantCode& a, const QuantCode& b) const {
-    const size_t nbytes = (dim_ + 7) / 8;
-    float h = 0.0F;
-    for (size_t i = 0; i < nbytes; ++i) {
-        h += static_cast<float>(popcount64(a.bytes[i] ^ b.bytes[i]));
-    }
-    return h;
+    return quant::binary_hamming(a.bytes.data(), b.bytes.data(), code_bytes());
 }
 
 size_t BinaryQuantizer::code_bytes() const { return (dim_ + 7) / 8; }

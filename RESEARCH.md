@@ -206,11 +206,11 @@
 ### 项目亮点话术（简历 bullet）
 
 > **LuminaStore — C++20 高性能嵌入式向量数据库**（个人项目，GitHub 公开）
-> - 实现 HNSW 图索引与启发式邻居选择，支持增量插入/删除/更新与 L2/IP/Cosine 度量；实现 SQ8/二进制/PQ 量化（内存 4x–32x 压缩），top-10 召回与全精度一致（recall@10=1.0，实测 2 万条）
+> - 实现 HNSW 图索引与启发式邻居选择，支持增量插入/删除/更新与 L2/IP/Cosine 度量；真实数据（MNIST 60k×784）recall@10 达 0.97-0.999，与 hnswlib 同机对比 recall 差 ≤2.4pp、QPS 同一数量级
 > - 设计 WAL 持久化（CRC32、大端格式、group commit、尾损坏自动修复）+ MANIFEST 快照与增量重放，kill -9 后重启数据一致
-> - 实现过滤检索双模式（in-filter / post-filter），谓词预计算为 bitmap 位图，10% 选择性下两模式 recall@10=1.0，in-filter 延迟更低
-> - 实现 SIMD 距离内核运行时派发（AVX2/AVX-512/NEON），recall-QPS 评测工具输出 100k×128d 前沿曲线（如 recall@10=0.86 @ 10.5k QPS，ef=200）
-> - 提供句柄式 C API 与 Python 绑定（numpy 批量 add/search），11 组单元测试 + 4 组 benchmark 全绿
+> - 实现过滤检索双模式（in-filter / post-filter），谓词预计算为 bitmap 位图，1%-50% 选择性下 recall@10=1.0
+> - 实现 SQ8/Binary/PQ 量化（内存 4x-32x 压缩）+ SIMD 距离内核，量化码间距离快于全精度 L2 2-4x，top-10 召回与全精度一致
+> - 提供句柄式 C API 与 Python 绑定（numpy 批量 add/search），12 组单元测试 + 4 组 benchmark + recall-QPS 评测工具全绿
 
 ### 面试可能问题清单（提前准备）
 
