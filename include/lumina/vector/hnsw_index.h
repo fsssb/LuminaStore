@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,6 +16,10 @@ struct SearchResult {
     uint64_t id;
     float    distance;
 };
+
+// Predicate evaluated on entry ids during filtered search (in-filter: applied
+// when a candidate enters the result set, graph traversal stays unfiltered).
+using FilterFn = std::function<bool(uint64_t id)>;
 
 // HNSW approximate nearest neighbour index (v2).
 //
@@ -51,6 +56,12 @@ public:
     // Find the k nearest neighbours to query (excluding deleted entries).
     std::vector<SearchResult> search_top_k(const float* query, size_t k,
                                            size_t ef_search = 50) const;
+
+    // Filtered variant: only ids for which filter(id) returns true are emitted.
+    // filter == nullptr behaves like search_top_k.
+    std::vector<SearchResult> search_top_k_filtered(const float* query, size_t k,
+                                                    size_t ef_search,
+                                                    const FilterFn& filter) const;
 
     // Number of live (non-deleted) entries.
     size_t size() const;
