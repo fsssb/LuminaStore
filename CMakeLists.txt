@@ -50,6 +50,7 @@ include_directories(include)
 # ---- Core library ----
 file(GLOB_RECURSE LUMINA_SOURCES
     src/common/*.cpp
+    src/engine/*.cpp
     src/storage/*.cpp
 )
 file(GLOB LUMINA_VECTOR_BASE src/vector/*.cpp)

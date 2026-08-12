@@ -180,8 +180,8 @@ std::vector<Candidate> search_layer(const HNSWIndex::Impl& d, const float* query
             {
                 NodeLock lk(d, nb_idx);
                 const auto& nb = d.nodes[nb_idx];
-                if (nb.deleted) {
-                    continue;
+                if (nb.deleted || layer > nb.max_layer) {
+                    continue;  // stale asymmetric edge to a lower-layer node
                 }
                 nd = d.dist(query, nb.vec.data(), d.dim);
             }
@@ -274,6 +274,9 @@ void connect_bidirectional(HNSWIndex::Impl& d, size_t a, size_t b, int layer, si
     bool overflow_b = false;
     {
         DualNodeLock lk(d, a, b);
+        if (layer > d.nodes[a].max_layer || layer > d.nodes[b].max_layer) {
+            return;  // defensive: stale asymmetric edge; never touch out-of-range layer
+        }
         auto& na = d.nodes[a].neighbors[static_cast<size_t>(layer)];
         auto& nb = d.nodes[b].neighbors[static_cast<size_t>(layer)];
         if (std::find(na.begin(), na.end(), b) == na.end()) {
@@ -307,6 +310,9 @@ HNSWIndex::HNSWIndex(size_t dim, size_t M, size_t ef_construction, DistanceFn di
 
 HNSWIndex::~HNSWIndex() = default;
 
+HNSWIndex::HNSWIndex(HNSWIndex&&) noexcept = default;
+HNSWIndex& HNSWIndex::operator=(HNSWIndex&&) noexcept = default;
+
 Status HNSWIndex::add_item(uint64_t id, const float* vec) {
     auto& d = *impl_;
     if (vec == nullptr) {
@@ -314,36 +320,33 @@ Status HNSWIndex::add_item(uint64_t id, const float* vec) {
     }
     std::lock_guard<std::mutex> label(d.label_locks[d.stripe_for(id)]);
 
-    size_t new_idx = 0;
-    int    new_layer = 0;
-    {
-        std::unique_lock<std::shared_mutex> g(d.struct_lock);
-        if (d.id_to_idx.count(id) != 0U) {
-            return Status::InvalidArgument("duplicate id");
-        }
-        new_layer = random_level(d);
-        Node node;
-        node.id = id;
-        node.vec.assign(vec, vec + d.dim);
-        node.max_layer = new_layer;
-        node.neighbors.resize(static_cast<size_t>(new_layer + 1));
-        for (int l = 0; l <= new_layer; ++l) {
-            node.neighbors[static_cast<size_t>(l)].reserve(l == 0 ? 2 * d.M : d.M);
-        }
-        new_idx = d.nodes.size();
-        d.nodes.push_back(std::move(node));
-        d.id_to_idx[id] = new_idx;
-        ++d.active_count;
-        if (d.entry_point.load() < 0) {
-            d.entry_point.store(static_cast<int>(new_idx));
-            d.max_layer.store(new_layer);
-            return Status::OK();
-        }
+    // Whole add under one exclusive struct lock: graph wiring mutates neighbour
+    // lists, and concurrent searches must not observe half-written vectors.
+    std::unique_lock<std::shared_mutex> g(d.struct_lock);
+
+    if (d.id_to_idx.count(id) != 0U) {
+        return Status::InvalidArgument("duplicate id");
+    }
+    const int new_layer = random_level(d);
+    Node node;
+    node.id = id;
+    node.vec.assign(vec, vec + d.dim);
+    node.max_layer = new_layer;
+    node.neighbors.resize(static_cast<size_t>(new_layer + 1));
+    for (int l = 0; l <= new_layer; ++l) {
+        node.neighbors[static_cast<size_t>(l)].reserve(l == 0 ? 2 * d.M : d.M);
+    }
+    const size_t new_idx = d.nodes.size();
+    d.nodes.push_back(std::move(node));
+    d.id_to_idx[id] = new_idx;
+    ++d.active_count;
+    if (d.entry_point.load() < 0) {
+        d.entry_point.store(static_cast<int>(new_idx));
+        d.max_layer.store(new_layer);
+        return Status::OK();
     }
 
     {
-        std::shared_lock<std::shared_mutex> shared(d.struct_lock);
-
         size_t ep = static_cast<size_t>(d.entry_point.load());
         for (int l = d.max_layer.load(); l > new_layer; --l) {
             const auto res = search_layer(d, vec, ep, 1, l);
@@ -363,14 +366,11 @@ Status HNSWIndex::add_item(uint64_t id, const float* vec) {
                 connect_bidirectional(d, new_idx, nb, l, max_m);
             }
         }
-    }  // release shared lock before upgrading
+    }
 
     if (new_layer > d.max_layer.load()) {
-        std::unique_lock<std::shared_mutex> g(d.struct_lock);
-        if (new_layer > d.max_layer.load()) {
-            d.max_layer.store(new_layer);
-            d.entry_point.store(static_cast<int>(new_idx));
-        }
+        d.max_layer.store(new_layer);
+        d.entry_point.store(static_cast<int>(new_idx));
     }
     return Status::OK();
 }
@@ -422,20 +422,21 @@ Status HNSWIndex::update_item(uint64_t id, const float* vec) {
     }
     std::lock_guard<std::mutex> label(d.label_locks[d.stripe_for(id)]);
 
-    size_t idx = 0;
-    {
-        std::unique_lock<std::shared_mutex> g(d.struct_lock);
-        const auto it = d.id_to_idx.find(id);
-        if (it == d.id_to_idx.end()) {
-            return Status::NotFound("id not found");
-        }
-        idx = it->second;
-    }
+    // The whole update runs under one exclusive struct lock: detach, reset and
+    // re-insert must be atomic with respect to searches. This is conservative
+    // (writes are serialized against reads) but correct; the fine-grained lock
+    // path (shared + node stripes) was observed to corrupt neighbour vectors
+    // under concurrent search, so correctness wins over write/read overlap.
+    std::unique_lock<std::shared_mutex> g(d.struct_lock);
 
-    // 1. Detach all old edges (both directions). Shared lock: no structural change,
-    //    neighbour lists are protected by node stripes.
+    const auto it = d.id_to_idx.find(id);
+    if (it == d.id_to_idx.end()) {
+        return Status::NotFound("id not found");
+    }
+    const size_t idx = it->second;
+
+    // 1. Detach all old edges (both directions).
     {
-        std::shared_lock<std::shared_mutex> shared(d.struct_lock);
         std::vector<std::vector<size_t>> old_neighbors;
         int old_max_layer = 0;
         {
@@ -446,6 +447,9 @@ Status HNSWIndex::update_item(uint64_t id, const float* vec) {
         for (int l = 0; l <= old_max_layer; ++l) {
             for (const size_t nb : old_neighbors[static_cast<size_t>(l)]) {
                 DualNodeLock lk(d, idx, nb);
+                if (l > d.nodes[nb].max_layer) {
+                    continue;  // defensive: stale asymmetric edge
+                }
                 auto& lst = d.nodes[nb].neighbors[static_cast<size_t>(l)];
                 lst.erase(std::remove(lst.begin(), lst.end(), idx), lst.end());
             }
@@ -454,20 +458,16 @@ Status HNSWIndex::update_item(uint64_t id, const float* vec) {
 
     // 2. Replace vector, reset layers, revive tombstoned entry.
     const int new_layer = random_level(d);
-    bool was_deleted = false;
     {
-        std::unique_lock<std::shared_mutex> g(d.struct_lock);
-        {
-            NodeLock nlk(d, idx);
-            was_deleted = d.nodes[idx].deleted;
-            auto& node = d.nodes[idx];
-            node.vec.assign(vec, vec + d.dim);
-            node.deleted = false;
-            node.max_layer = new_layer;
-            node.neighbors.assign(static_cast<size_t>(new_layer + 1), {});
-            for (int l = 0; l <= new_layer; ++l) {
-                node.neighbors[static_cast<size_t>(l)].reserve(l == 0 ? 2 * d.M : d.M);
-            }
+        NodeLock nlk(d, idx);
+        const bool was_deleted = d.nodes[idx].deleted;
+        auto& node = d.nodes[idx];
+        node.vec.assign(vec, vec + d.dim);
+        node.deleted = false;
+        node.max_layer = new_layer;
+        node.neighbors.assign(static_cast<size_t>(new_layer + 1), {});
+        for (int l = 0; l <= new_layer; ++l) {
+            node.neighbors[static_cast<size_t>(l)].reserve(l == 0 ? 2 * d.M : d.M);
         }
         if (was_deleted) {
             ++d.active_count;
@@ -475,9 +475,11 @@ Status HNSWIndex::update_item(uint64_t id, const float* vec) {
     }
 
     // 3. Re-insert like a fresh node.
-    bool promote = false;
-    {
-        std::shared_lock<std::shared_mutex> shared(d.struct_lock);
+    if (d.entry_point.load() < 0) {
+        // Empty-graph state (the last live node was tombstoned): promote this node.
+        d.entry_point.store(static_cast<int>(idx));
+        d.max_layer.store(new_layer);
+    } else {
         size_t ep = static_cast<size_t>(d.entry_point.load());
         for (int l = d.max_layer.load(); l > new_layer; --l) {
             const auto res = search_layer(d, vec, ep, 1, l);
@@ -496,10 +498,6 @@ Status HNSWIndex::update_item(uint64_t id, const float* vec) {
                 connect_bidirectional(d, idx, nb, l, max_m);
             }
         }
-        promote = (new_layer > d.max_layer.load());
-    }  // release shared lock before upgrading
-    if (promote) {
-        std::unique_lock<std::shared_mutex> g(d.struct_lock);
         if (new_layer > d.max_layer.load()) {
             d.max_layer.store(new_layer);
             d.entry_point.store(static_cast<int>(idx));

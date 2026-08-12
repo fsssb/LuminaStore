@@ -1,32 +1,54 @@
-#include "lumina/vector/hnsw_index.h"
+#include "lumina/engine/collection.h"
+#include "lumina/engine/filter.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <exception>
-#include <iostream>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+// Handle-based C API v2 (replaces the v1 global-singleton API).
+//
+//   void* h = lumina_open("/data/dir", dim, metric);
+//   lumina_add(h, id, vec, dim, payload);
+//   char* json = lumina_search(h, query, dim, top_k);
+//   ...
+//   lumina_close(h);
+//
+// metric: 0=L2, 1=IP, 2=Cosine.
+
 namespace {
 
-struct LuminaBridgeState {
-    size_t dim = 0;
-    std::unique_ptr<lumina::HNSWIndex> index;
-    std::unordered_map<uint64_t, std::string> payloads;
-    std::mutex mutex;
+struct Handle {
+    std::unique_ptr<lumina::Collection> collection;
+    std::mutex mutex;  // serializes search/read so JSON buffers stay consistent
 };
 
-LuminaBridgeState g_state;
+std::unordered_map<void*, std::unique_ptr<Handle>> g_handles;
+std::mutex g_handles_mutex;
+
+Handle* lookup(void* h) {
+    std::lock_guard<std::mutex> lock(g_handles_mutex);
+    const auto it = g_handles.find(h);
+    return (it == g_handles.end()) ? nullptr : it->second.get();
+}
+
+char* alloc_c_string(const std::string& text) {
+    char* buffer = static_cast<char*>(std::malloc(text.size() + 1));
+    if (buffer == nullptr) {
+        return nullptr;
+    }
+    std::memcpy(buffer, text.c_str(), text.size() + 1);
+    return buffer;
+}
 
 std::string json_escape(const std::string& input) {
     std::string out;
     out.reserve(input.size() + 16);
-    for (char c : input) {
+    for (const char c : input) {
         switch (c) {
             case '\\':
                 out += "\\\\";
@@ -51,132 +73,136 @@ std::string json_escape(const std::string& input) {
     return out;
 }
 
-char* alloc_c_string(const std::string& text) {
-    char* buffer = static_cast<char*>(std::malloc(text.size() + 1));
-    if (!buffer) {
-        return nullptr;
+lumina::Metric metric_from_int(int metric) {
+    switch (metric) {
+        case 1:
+            return lumina::Metric::kIP;
+        case 2:
+            return lumina::Metric::kCosine;
+        default:
+            return lumina::Metric::kL2;
     }
-    std::memcpy(buffer, text.c_str(), text.size() + 1);
-    return buffer;
 }
 
 }  // namespace
 
 extern "C" {
 
-int lumina_init(int dim) {
-    try {
-        if (dim <= 0) {
-            std::cerr << "[Lumina C API] 初始化失败：维度必须大于 0，收到 dim=" << dim << std::endl;
-            return -1;
-        }
+// ---- lifecycle ----
 
-        std::lock_guard<std::mutex> lock(g_state.mutex);
-        g_state.dim = static_cast<size_t>(dim);
-        g_state.index = std::make_unique<lumina::HNSWIndex>(g_state.dim);
-        g_state.payloads.clear();
-        std::cout << "[Lumina C API] 初始化成功，向量维度 dim=" << dim << std::endl;
-        return 0;
-    } catch (const std::exception& e) {
-        std::cerr << "[Lumina C API] 初始化异常：" << e.what() << std::endl;
+void* lumina_open(const char* dir, int dim, int metric) {
+    if (dir == nullptr || dim <= 0) {
+        return nullptr;
+    }
+    auto handle = std::make_unique<Handle>();
+    handle->collection = std::make_unique<lumina::Collection>(dir, static_cast<size_t>(dim),
+                                                              metric_from_int(metric));
+    const lumina::Status s = handle->collection->open();
+    if (!s.ok()) {
+        return nullptr;
+    }
+
+    std::lock_guard<std::mutex> lock(g_handles_mutex);
+    void* key = handle.get();
+    g_handles.emplace(key, std::move(handle));
+    return key;
+}
+
+int lumina_close(void* h) {
+    std::lock_guard<std::mutex> lock(g_handles_mutex);
+    return g_handles.erase(h) == 1U ? 0 : -1;
+}
+
+// ---- writes ----
+
+int lumina_add(void* h, uint64_t id, const float* vec, int dim, const char* payload) {
+    Handle* handle = lookup(h);
+    if (handle == nullptr || vec == nullptr || dim <= 0 || payload == nullptr) {
+        return -1;
+    }
+    return handle->collection->add(id, vec, payload).ok() ? 0 : -2;
+}
+
+int lumina_remove(void* h, uint64_t id) {
+    Handle* handle = lookup(h);
+    if (handle == nullptr) {
+        return -1;
+    }
+    return handle->collection->remove(id).ok() ? 0 : -2;
+}
+
+// ---- reads ----
+
+char* lumina_search(void* h, const float* query, int dim, int top_k) {
+    Handle* handle = lookup(h);
+    if (handle == nullptr || query == nullptr || dim <= 0) {
+        return alloc_c_string("{\"error\":\"bad args\",\"results\":[]}");
+    }
+    std::lock_guard<std::mutex> lock(handle->mutex);
+
+    const size_t k = static_cast<size_t>(std::max(1, top_k));
+    const auto hits = handle->collection->search(query, k, {.ef_search = 200});
+
+    std::string json = "{\"results\":[";
+    bool first = true;
+    for (const auto& hit : hits) {
+        std::string payload;
+        handle->collection->get(hit.id, &payload);  // best-effort
+        if (!first) {
+            json += ",";
+        }
+        first = false;
+        json += "{\"id\":" + std::to_string(hit.id) +
+                ",\"distance\":" + std::to_string(hit.distance) +
+                ",\"payload\":\"" + json_escape(payload) + "\"}";
+    }
+    json += "]}";
+    return alloc_c_string(json);
+}
+
+int lumina_get(void* h, uint64_t id, char** payload, int* out_len) {
+    Handle* handle = lookup(h);
+    if (handle == nullptr || payload == nullptr) {
+        return -1;
+    }
+    std::string text;
+    const lumina::Status s = handle->collection->get(id, &text);
+    if (!s.ok()) {
         return -2;
-    } catch (...) {
-        std::cerr << "[Lumina C API] 初始化未知异常" << std::endl;
+    }
+    char* copy = alloc_c_string(text);
+    if (copy == nullptr) {
         return -3;
     }
+    *payload = copy;
+    if (out_len != nullptr) {
+        *out_len = static_cast<int>(text.size());
+    }
+    return 0;
 }
 
-int lumina_add_vector(uint64_t id, const float* vector, int dim, const char* payload_text) {
-    try {
-        if (!vector || !payload_text) {
-            std::cerr << "[Lumina C API] 插入失败：vector/payload 为空指针" << std::endl;
-            return -1;
-        }
+// ---- maintenance ----
 
-        std::lock_guard<std::mutex> lock(g_state.mutex);
-        if (!g_state.index) {
-            std::cerr << "[Lumina C API] 插入失败：请先调用 lumina_init" << std::endl;
-            return -2;
-        }
-        if (dim <= 0 || static_cast<size_t>(dim) != g_state.dim) {
-            std::cerr << "[Lumina C API] 插入失败：维度不匹配，expect=" << g_state.dim
-                      << " got=" << dim << std::endl;
-            return -3;
-        }
-
-        const lumina::Status status = g_state.index->add_item(id, vector);
-        if (!status.ok()) {
-            std::cerr << "[Lumina C API] 插入失败：HNSW add_item 错误，id=" << id
-                      << " status=" << status.ToString() << std::endl;
-            return -4;
-        }
-
-        g_state.payloads[id] = payload_text;
-        std::cout << "[Lumina C API] 插入成功，id=" << id << std::endl;
-        return 0;
-    } catch (const std::exception& e) {
-        std::cerr << "[Lumina C API] 插入异常：" << e.what() << std::endl;
-        return -5;
-    } catch (...) {
-        std::cerr << "[Lumina C API] 插入未知异常" << std::endl;
-        return -6;
+int lumina_snapshot(void* h) {
+    Handle* handle = lookup(h);
+    if (handle == nullptr) {
+        return -1;
     }
+    return handle->collection->snapshot().ok() ? 0 : -2;
 }
 
-char* lumina_search_vector(const float* query_vector, int dim, int top_k) {
-    try {
-        if (!query_vector) {
-            std::cerr << "[Lumina C API] 检索失败：query_vector 为空指针" << std::endl;
-            return alloc_c_string("{\"error\":\"query_vector is null\",\"results\":[]}");
-        }
-
-        std::lock_guard<std::mutex> lock(g_state.mutex);
-        if (!g_state.index) {
-            std::cerr << "[Lumina C API] 检索失败：请先调用 lumina_init" << std::endl;
-            return alloc_c_string("{\"error\":\"engine not initialized\",\"results\":[]}");
-        }
-        if (dim <= 0 || static_cast<size_t>(dim) != g_state.dim) {
-            std::cerr << "[Lumina C API] 检索失败：维度不匹配，expect=" << g_state.dim
-                      << " got=" << dim << std::endl;
-            return alloc_c_string("{\"error\":\"dimension mismatch\",\"results\":[]}");
-        }
-
-        const size_t k = std::max(1, top_k);
-        const auto hits = g_state.index->search_top_k(query_vector, k);
-
-        std::string json = "{\"results\":[";
-        bool first = true;
-        for (const auto& hit : hits) {
-            const auto it = g_state.payloads.find(hit.id);
-            const std::string payload = (it == g_state.payloads.end()) ? "" : it->second;
-            if (!first) {
-                json += ",";
-            }
-            first = false;
-            json += "{\"id\":";
-            json += std::to_string(hit.id);
-            json += ",\"distance\":";
-            json += std::to_string(hit.distance);
-            json += ",\"payload\":\"";
-            json += json_escape(payload);
-            json += "\"}";
-        }
-        json += "]}";
-        std::cout << "[Lumina C API] 检索完成，top_k=" << k << " 命中条数=" << hits.size() << std::endl;
-        return alloc_c_string(json);
-    } catch (const std::exception& e) {
-        std::cerr << "[Lumina C API] 检索异常：" << e.what() << std::endl;
-        return alloc_c_string("{\"error\":\"search exception\",\"results\":[]}");
-    } catch (...) {
-        std::cerr << "[Lumina C API] 检索未知异常" << std::endl;
-        return alloc_c_string("{\"error\":\"unknown exception\",\"results\":[]}");
+char* lumina_stats(void* h) {
+    Handle* handle = lookup(h);
+    if (handle == nullptr) {
+        return alloc_c_string("{\"error\":\"invalid handle\"}");
     }
+    const auto stats = handle->collection->stats();
+    std::string json = "{\"live_entries\":" + std::to_string(stats.live_entries) +
+                       ",\"wal_bytes\":" + std::to_string(stats.wal_bytes) + "}";
+    return alloc_c_string(json);
 }
 
 void lumina_free_string(char* ptr) {
-    if (!ptr) {
-        return;
-    }
     std::free(ptr);
 }
 

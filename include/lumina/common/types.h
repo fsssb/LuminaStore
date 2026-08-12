@@ -42,6 +42,7 @@ public:
     bool IsNotFound()  const { return code_ == StatusCode::kNotFound; }
     bool IsIOError()   const { return code_ == StatusCode::kIOError; }
     bool IsCorruption() const { return code_ == StatusCode::kCorruption; }
+    bool IsInvalidArgument() const { return code_ == StatusCode::kInvalidArgument; }
 
     StatusCode code() const { return code_; }
     const std::string& message() const { return msg_; }

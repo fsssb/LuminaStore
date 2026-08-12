@@ -32,9 +32,11 @@ public:
                        DistanceFn dist = nullptr);
     ~HNSWIndex();
 
-    // Non-copyable
+    // Non-copyable, movable
     HNSWIndex(const HNSWIndex&)            = delete;
     HNSWIndex& operator=(const HNSWIndex&) = delete;
+    HNSWIndex(HNSWIndex&&) noexcept;
+    HNSWIndex& operator=(HNSWIndex&&) noexcept;
 
     // Insert a vector with a given id. Fails with kInvalidArgument on duplicate id.
     Status add_item(uint64_t id, const float* vec);
