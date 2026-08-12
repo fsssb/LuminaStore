@@ -59,10 +59,10 @@ quantization and filtering numbers, and reproduction commands.
 
 ```mermaid
 xychart-beta
-    title "recall@10 vs QPS (100k x 128d, M=32, ef_construction=400)"
-    x-axis "recall@10" [0.32, 0.47, 0.61, 0.77, 0.88]
-    y-axis "QPS" 0 --> 9000
-    line [7978, 4189, 2459, 1356, 755]
+    title "recall@10 vs QPS (MNIST 60k x 784, M=32, ef_construction=400)"
+    x-axis "recall@10" [0.97, 0.99, 0.9975, 0.999, 0.9995]
+    y-axis "QPS" 0 --> 5000
+    line [4449, 3430, 1921, 1079, 613]
 ```
 
 ## On-disk formats

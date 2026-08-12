@@ -11,10 +11,13 @@
 #include "lumina/vector/hnsw_index.h"
 #include "lumina/vector/vector_math.h"
 
+#include "fvecs_reader.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <random>
 #include <string>
 #include <unordered_set>
@@ -44,47 +47,121 @@ int main(int argc, char** argv) {
     size_t k = 10;
     size_t M = 16;
     size_t ef_construction = 200;
+    std::string data_path;    // --data <base.fvecs>
+    std::string query_path;   // --queries <query.fvecs> (optional; default: random)
     std::vector<size_t> efs = {10, 50, 100, 200, 400};
 
-    if (argc > 1) n = std::strtoull(argv[1], nullptr, 10);
-    if (argc > 2) dim = std::strtoull(argv[2], nullptr, 10);
-    if (argc > 3) nq = std::strtoull(argv[3], nullptr, 10);
-    if (argc > 4) k = std::strtoull(argv[4], nullptr, 10);
-    if (argc > 5) {
-        efs.clear();
-        std::string s = argv[5];
-        size_t pos = 0;
-        while (pos < s.size()) {
-            const size_t comma = s.find(',', pos);
-            efs.push_back(std::strtoull(s.c_str() + pos, nullptr, 10));
-            if (comma == std::string::npos) {
-                break;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--data" && i + 1 < argc) {
+            data_path = argv[++i];
+        } else if (arg == "--queries" && i + 1 < argc) {
+            query_path = argv[++i];
+        } else if (arg == "--M" && i + 1 < argc) {
+            M = std::strtoull(argv[++i], nullptr, 10);
+        } else if (arg == "--efc" && i + 1 < argc) {
+            ef_construction = std::strtoull(argv[++i], nullptr, 10);
+        } else if (arg == "--k" && i + 1 < argc) {
+            k = std::strtoull(argv[++i], nullptr, 10);
+        } else if (arg == "--queries" && i + 1 < argc) {
+            nq = std::strtoull(argv[++i], nullptr, 10);
+        } else if (arg == "--ef" && i + 1 < argc) {
+            efs.clear();
+            std::string s = argv[++i];
+            size_t pos = 0;
+            while (pos < s.size()) {
+                const size_t comma = s.find(',', pos);
+                efs.push_back(std::strtoull(s.c_str() + pos, nullptr, 10));
+                if (comma == std::string::npos) {
+                    break;
+                }
+                pos = comma + 1;
             }
-            pos = comma + 1;
+        } else if (arg[0] != '-') {
+            // positional: n dim nq k "efs"
+            static int pos = 0;
+            switch (pos++) {
+                case 0: n = std::strtoull(arg.c_str(), nullptr, 10); break;
+                case 1: dim = std::strtoull(arg.c_str(), nullptr, 10); break;
+                case 2: nq = std::strtoull(arg.c_str(), nullptr, 10); break;
+                case 3: k = std::strtoull(arg.c_str(), nullptr, 10); break;
+                case 4:
+                    efs.clear();
+                    {
+                        size_t p = 0;
+                        while (p < arg.size()) {
+                            const size_t comma = arg.find(',', p);
+                            efs.push_back(std::strtoull(arg.c_str() + p, nullptr, 10));
+                            if (comma == std::string::npos) {
+                                break;
+                            }
+                            p = comma + 1;
+                        }
+                    }
+                    break;
+            }
         }
     }
-    if (argc > 6) M = std::strtoull(argv[6], nullptr, 10);
-    if (argc > 7) ef_construction = std::strtoull(argv[7], nullptr, 10);
 
     std::mt19937 rng(2026);
     std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
 
-    printf("# LuminaStore ANN benchmark\n");
-    printf("n=%zu dim=%zu queries=%zu k=%zu metric=L2\n\n", n, dim, nq, k);
+    // 1. Load or generate data + queries.
+    std::vector<std::vector<float>> vecs;
+    std::vector<std::vector<float>> queries;
+    if (!data_path.empty()) {
+        lumina::tools::FvecsData fdata;
+        try {
+            fdata = lumina::tools::read_fvecs(data_path);
+        } catch (const std::exception& e) {
+            printf("error loading %s: %s\n", data_path.c_str(), e.what());
+            return 1;
+        }
+        dim = fdata.dim;
+        n = fdata.count;
+        vecs.resize(n);
+        for (size_t i = 0; i < n; ++i) {
+            vecs[i].assign(fdata.vec(i), fdata.vec(i) + dim);
+        }
+        if (!query_path.empty()) {
+            lumina::tools::FvecsData qdata;
+            try {
+                qdata = lumina::tools::read_fvecs(query_path);
+            } catch (const std::exception& e) {
+                printf("error loading queries: %s\n", e.what());
+                return 1;
+            }
+            nq = std::min<size_t>(nq, qdata.count);
+            queries.resize(nq);
+            for (size_t i = 0; i < nq; ++i) {
+                queries[i].assign(qdata.vec(i), qdata.vec(i) + dim);
+            }
+        } else {
+            queries.resize(nq, std::vector<float>(dim));
+            for (auto& q : queries) {
+                for (auto& x : q) {
+                    x = dist(rng);
+                }
+            }
+        }
+    } else {
+        vecs.resize(n, std::vector<float>(dim));
+        for (auto& v : vecs) {
+            for (auto& x : v) {
+                x = dist(rng);
+            }
+        }
+        queries.resize(nq, std::vector<float>(dim));
+        for (auto& q : queries) {
+            for (auto& x : q) {
+                x = dist(rng);
+            }
+        }
+    }
 
-    // 1. Generate data + queries.
-    std::vector<std::vector<float>> vecs(n, std::vector<float>(dim));
-    for (auto& v : vecs) {
-        for (auto& x : v) {
-            x = dist(rng);
-        }
-    }
-    std::vector<std::vector<float>> queries(nq, std::vector<float>(dim));
-    for (auto& q : queries) {
-        for (auto& x : q) {
-            x = dist(rng);
-        }
-    }
+    printf("# LuminaStore ANN benchmark\n");
+    printf("data=%s n=%zu dim=%zu queries=%zu k=%zu M=%zu ef_construction=%zu metric=L2\n\n",
+           data_path.empty() ? "random" : data_path.c_str(), n, dim, nq, k, M, ef_construction);
 
     // 2. Build index.
     const auto t0 = Clock::now();
@@ -93,7 +170,6 @@ int main(int argc, char** argv) {
         index.add_item(i, vecs[i].data());
     }
     const double build_ms = now_ms(t0, Clock::now());
-    const size_t graph_bytes = 0;  // estimate below
     printf("build time: %.1f ms (%.0f vectors/s)\n\n", build_ms, n / (build_ms / 1000.0));
 
     // 3. Ground truth (brute-force top-k per query).

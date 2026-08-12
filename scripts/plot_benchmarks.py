@@ -12,13 +12,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# (ef, recall@10, qps)
+# (ef, recall@10, qps) — MNIST 60k x 784, M=32, ef_construction=400
 POINTS = [
-    (50, 0.3195, 7978.4),
-    (100, 0.4675, 4189.0),
-    (200, 0.6140, 2458.5),
-    (400, 0.7695, 1355.9),
-    (800, 0.8845, 755.0),
+    (50, 0.9710, 4448.6),
+    (100, 0.9910, 3430.2),
+    (200, 0.9975, 1920.5),
+    (400, 0.9990, 1078.6),
+    (800, 0.9995, 613.2),
 ]
 
 def main():
@@ -34,7 +34,7 @@ def main():
     ax.set_xlabel("recall@10")
     ax.set_ylabel("QPS (log)")
     ax.set_yscale("log")
-    ax.set_title("LuminaStore HNSW: recall@10 vs QPS\n100k x 128d random uniform, M=32, ef_construction=400")
+    ax.set_title("LuminaStore HNSW: recall@10 vs QPS\nMNIST 60k x 784, M=32, ef_construction=400")
     ax.grid(True, which="both", alpha=0.3)
 
     out = os.path.join(os.path.dirname(__file__), "..", "docs", "recall_qps.png")
