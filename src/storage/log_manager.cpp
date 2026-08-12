@@ -31,7 +31,8 @@ Status io_error(std::string what) {
 
 bool is_valid_op(uint8_t op) {
     return op == static_cast<uint8_t>(OpType::kPut) || op == static_cast<uint8_t>(OpType::kDelete) ||
-           op == static_cast<uint8_t>(OpType::kVectorPut);
+           op == static_cast<uint8_t>(OpType::kVectorPut) ||
+           op == static_cast<uint8_t>(OpType::kVectorPutV2);
 }
 
 bool write_all(int fd, const void* buf, size_t len) {

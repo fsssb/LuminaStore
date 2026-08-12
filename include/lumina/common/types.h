@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <variant>
 
 namespace lumina {
 
@@ -88,6 +89,41 @@ private:
     std::string_view view_;
 };
 
+// ---- Distance metric ----
+
+enum class Metric : uint8_t {
+    kL2     = 0,
+    kIP     = 1,
+    kCosine = 2,
+};
+
+// ---- Scalar filter fields ----
+// 过滤字段值：int64 / double / string 三态。
+
+using ScalarValue = std::variant<int64_t, double, std::string>;
+
+struct ScalarField {
+    std::string  name;
+    ScalarValue value;
+};
+
+// ---- Quantization config ----
+
+struct QuantConfig {
+    enum class Mode : uint8_t {
+        kNone   = 0,
+        kSQ8    = 1,
+        kBinary = 2,
+        kPQ     = 3,
+    };
+
+    Mode   mode            = Mode::kNone;
+    size_t pq_subspaces    = 16;    // PQ 子空间数 m（仅 kPQ 生效）
+    size_t pq_centroids    = 256;   // 每子空间质心数 k（仅 kPQ 生效，<= 256 用 8bit 编码）
+
+    bool enabled() const { return mode != Mode::kNone; }
+};
+
 // ---- Options ----
 
 struct Options {
@@ -116,14 +152,26 @@ struct Options {
     size_t hnsw_M              = 16;
     size_t hnsw_ef_construction = 200;
     size_t hnsw_ef_search       = 50;
+
+    // ---- v2 additions ----
+    Metric metric = Metric::kL2;
+
+    // Snapshot directory (manifest + .snap files live here)
+    std::string snapshot_dir = "lumina_snap";
+
+    // Trigger a snapshot after this many new WAL bytes since the last snapshot.
+    size_t snapshot_interval_bytes = 256ULL * 1024 * 1024;
+
+    QuantConfig quant;
 };
 
 // ---- WAL OpType ----
 
 enum class OpType : uint8_t {
-    kPut       = 0x01,
-    kDelete    = 0x02,
-    kVectorPut = 0x03,
+    kPut          = 0x01,
+    kDelete       = 0x02,
+    kVectorPut    = 0x03,
+    kVectorPutV2  = 0x04,   // v2: value = encoded EntryMeta (vec + payload + scalars)
 };
 
 } // namespace lumina
