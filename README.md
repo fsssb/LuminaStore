@@ -1,106 +1,85 @@
 # LuminaStore
 
-LuminaStore is a high-performance persistent vector storage engine prototype in C++20.
-It provides:
+LuminaStore is a high-performance embedded vector storage engine in C++20:
+an HNSW approximate nearest neighbour index fused with a WAL-backed storage
+layer (payload + scalar filter fields persist across restarts).
 
-- Append-only WAL for durability
-- In-memory key->offset index for O(1) lookup path
-- Recovery by replaying WAL on startup
-- SIMD-dispatched vector distance kernels
-- HNSW approximate nearest neighbor index
+- **Storage**: append-only WAL (CRC32, big-endian, tail repair), snapshot +
+  manifest incremental recovery
+- **Index**: HNSW with heuristic neighbour selection, tombstone delete/update,
+  injectable metrics (L2 / IP / Cosine)
+- **Quantization**: SQ8 / Binary / PQ with ADC distances (4x–32x memory cuts)
+- **Filtering**: bitmap filter index, in-filter / post-filter search modes
+- **API**: handle-based C API, Python (ctypes + numpy) bindings, plus gtest /
+  google-benchmark suites
 
 ## Build
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
+ctest --test-dir build            # all unit tests
 ```
 
-Enable ASAN:
+ASAN build:
 
 ```bash
 cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DLUMINA_ENABLE_ASAN=ON
 cmake --build build-asan -j
 ```
 
-If you build the AVX-512F translation unit on x86 but want to **exclude** the AVX-512 *dispatch* branch at runtime (e.g. to avoid 512-related frequency side effects, while still linking the TU), set `-DLUMINA_RUNTIME_USE_AVX512=OFF` (this sets `LUMINA_ALLOW_AVX512_KERNEL=0`).
+## Quick start (C API)
 
-**x86 runtime dispatch order** (when the corresponding object files are built): the implementation tries **AVX2 + FMA** first, then **AVX-512F** only if the AVX2 path was not taken. On typical CPUs that expose both, **AVX2 remains selected** — AVX-512 is used mainly when AVX2 is absent or not usable. That is a conservative default; a future `LUMINA_PREFER_AVX512` (or similar) could change that policy. “Allow AVX-512 at runtime” does **not** mean “prefer AVX-512 over AVX2”.
-
-For a fully native-tuned build on your machine (optional, not portable to older CPUs of the same ISA):
-
-```bash
-cmake -S . -B build-native -DLUMINA_ENABLE_MARCH_NATIVE=ON
-cmake --build build-native -j
+```c
+void* h = lumina_open("/tmp/db", /*dim=*/128, /*metric=*/0);   // 0=L2, 1=IP, 2=Cosine
+lumina_add(h, 1, vec, 128, "payload-text");
+lumina_add_batch(h, ids, vectors_flat, n, 128, payloads);
+char* json = lumina_search(h, query, 128, /*top_k=*/10);       // {"results":[...]}
+lumina_snapshot(h);               // durable snapshot + WAL watermark
+lumina_close(h);
 ```
 
-**SIMD 与距离函数**：实现位于 `src/vector/vector_math_scalar.cpp`（标量、运行时 CPU 能力检测与派发）及可选的 `vector_math_neon.cpp` / `vector_math_avx2.cpp` / `vector_math_avx512.cpp`（由 `cmake/DetectSIMD.cmake` 决定是否编译，并为各 TU 单独加 `-mavx2`、`-mfma`、`-mavx512f` 等标志）。x86 上默认 **先尝试 AVX2，再考虑 AVX-512**；与 “允许运行时选 AVX-512” 的 CMake 开关含义见上文英语段落。`include/lumina/vector/aligned_alloc.h` 提供 64 字节对齐的 `AlignedFloatVector`，供 HNSW 节点向量等热路径使用。
+## Quick start (Python)
 
-## Run Tests
+```python
+import lumina, numpy as np
 
-```bash
-ctest --test-dir build --output-on-failure
+with lumina.open_collection("/tmp/db", dim=128, metric=0) as col:
+    col.add(ids=np.arange(1000), vectors=vecs, payloads=["..."] * 1000)
+    hits = col.search(queries, top_k=10)      # list of {id, distance, payload}
+    col.snapshot()
 ```
 
 ## Benchmarks
 
-```bash
-./build/storage_bench
-./build/vector_bench
+See [docs/benchmarks.md](docs/benchmarks.md) for recall-QPS curves,
+quantization and filtering numbers, and reproduction commands.
+
+## On-disk formats
+
+- WAL: 8-byte file header `[LMST][version][reserved]` then frames
+  `[OpType][CRC32][len][payload]`; ops `Put/Delete/VectorPut/VectorPutV2`.
+  Tail corruption is truncated on open, middle corruption is reported.
+- Snapshot (`snap-<seq>.snap`): magic `LMSN` + index table + WAL watermark;
+  manifest (`MANIFEST`) records the latest snapshots; recovery loads the
+  snapshot then replays the WAL tail.
+- HNSW file: magic `LMHN` + graph (nodes, layers, neighbour lists, tombstones).
+
+## Project layout
+
+```
+include/lumina/
+  common/     Status, Slice, Options, CRC32, SIMD dispatch
+  storage/    StorageEngine, LogManager (WAL), IndexManager, snapshot, manifest
+  index/      HNSW, quantizers (SQ8/Binary/PQ), FilterIndex
+  engine/     Collection (top-level), search pipeline, filter expressions
+  vector/     SIMD distance kernels, aligned allocator
+src/          matching implementation directories
+cpp_engine/   C API shared library (luminastore_shared)
+python/       ctypes + numpy bindings
+bench/        storage / vector / quant / filter benchmarks
+tools/        ann_bench (recall-QPS evaluator)
+tests/        gtest suites
 ```
 
-The benchmark binaries compare:
-
-- sequential write throughput and random read latency for storage
-- naive vs SIMD-dispatched L2 distance
-- HNSW top-k search latency
-
-## WAL on-disk format (v2, default for new files)
-
-A new WAL file starts with an 8-byte file header (big-endian multi-byte fields):
-
-```text
-[4B magic ASCII "LMST"]
-[2B format version, currently 1]
-[2B reserved, 0]
-```
-
-Each frame (also big-endian in the length fields used for CRC input):
-
-```text
-[1B OpType: 1=Put, 2=Delete, 3=VectorPut]
-[4B CRC32]
-[4B PayloadLen]
-Payload: [2B KeyLen BE][key bytes][value bytes]
-```
-
-Legacy v0 (no file header) is still read if the file does not start with the magic: host-endian length fields in the frame and in the payload key length.
-
-CRC covers `Op + encoded 4B payload length + full payload` (encoding matches the on-disk field layout).
-
-`open()` also runs a repair pass: **incomplete data at the end of the file is truncated** with `ftruncate` to the last valid frame. A **bad CRC on the last complete frame** is treated as tail damage and can be truncated. A **bad CRC on a frame that is not at EOF** (more data after it) is **middle corruption** and `open()` returns `Status::IsCorruption()`.
-
-I/O errors include `strerror` text from the OS.
-
-## Group commit (batch fsync)
-
-In `Options`:
-
-- `group_commit` — when true, `put` / `put_vector` / `remove` do not call `fsync` every time; use `StorageEngine::sync()` or set `sync_every_n_appends > 0` to auto-fsync every N writes.
-- `sync_writes` — if false, never fsync from the engine (manual `sync()` only).
-
-## Recovery flow
-
-`StorageEngine::open()`:
-
-1. Opens the WAL, detects v1 vs v2, runs tail repair.
-2. Replays the WAL, validates frame CRC, rejects invalid `OpType`.
-3. Rebuilds the in-memory index and applies delete tombstones.
-
-## Acceptance Checklist
-
-- Crash recovery via WAL replay
-- SIMD path selected at runtime (CPUID / CPU features) with optional per-ISA object files, not only the build host
-- HNSW `add_item` and `search_top_k` available
-- Save/load for HNSW graph index
-- Unit tests and benchmark scaffolding included
+Design and research notes: [V2_DESIGN.md](V2_DESIGN.md) and [RESEARCH.md](RESEARCH.md).

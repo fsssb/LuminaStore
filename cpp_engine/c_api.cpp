@@ -123,6 +123,24 @@ int lumina_add(void* h, uint64_t id, const float* vec, int dim, const char* payl
     return handle->collection->add(id, vec, payload).ok() ? 0 : -2;
 }
 
+// Batch add: `vectors` holds n vectors of `dim` floats each (row-major).
+int lumina_add_batch(void* h, const uint64_t* ids, const float* vectors, int n, int dim,
+                     const char* const* payloads) {
+    Handle* handle = lookup(h);
+    if (handle == nullptr || ids == nullptr || vectors == nullptr || n <= 0 || dim <= 0 ||
+        payloads == nullptr) {
+        return -1;
+    }
+    for (int i = 0; i < n; ++i) {
+        const lumina::Status s = handle->collection->add(ids[i], vectors + static_cast<size_t>(i) * dim,
+                                                         payloads[i] != nullptr ? payloads[i] : "");
+        if (!s.ok()) {
+            return -2;  // stop at first failure
+        }
+    }
+    return 0;
+}
+
 int lumina_remove(void* h, uint64_t id) {
     Handle* handle = lookup(h);
     if (handle == nullptr) {
@@ -179,6 +197,42 @@ int lumina_get(void* h, uint64_t id, char** payload, int* out_len) {
         *out_len = static_cast<int>(text.size());
     }
     return 0;
+}
+
+// Batch search: `queries` holds n vectors of `dim` floats each (row-major).
+// Returns a JSON document: {"results":[[{...},{...}], ...]}.
+char* lumina_search_batch(void* h, const float* queries, int n, int dim, int top_k) {
+    Handle* handle = lookup(h);
+    if (handle == nullptr || queries == nullptr || n <= 0 || dim <= 0) {
+        return alloc_c_string("{\"error\":\"bad args\",\"results\":[]}");
+    }
+    std::lock_guard<std::mutex> lock(handle->mutex);
+
+    const size_t k = static_cast<size_t>(std::max(1, top_k));
+    std::string json = "{\"results\":[";
+    for (int i = 0; i < n; ++i) {
+        const float* q = queries + static_cast<size_t>(i) * dim;
+        const auto hits = handle->collection->search(q, k, {.ef_search = 200});
+        if (i > 0) {
+            json += ",";
+        }
+        json += "[";
+        bool first = true;
+        for (const auto& hit : hits) {
+            std::string payload;
+            handle->collection->get(hit.id, &payload);  // best-effort
+            if (!first) {
+                json += ",";
+            }
+            first = false;
+            json += "{\"id\":" + std::to_string(hit.id) +
+                    ",\"distance\":" + std::to_string(hit.distance) +
+                    ",\"payload\":\"" + json_escape(payload) + "\"}";
+        }
+        json += "]";
+    }
+    json += "]}";
+    return alloc_c_string(json);
 }
 
 // ---- maintenance ----
