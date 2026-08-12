@@ -73,7 +73,7 @@ LuminaStore 是一个用 **C++20** 编写的 **高性能持久化向量存储引
 - **`StorageEngine::put_vector`**：把一条 **`OpType::kVectorPut`** 记录追加到 **WAL**，并在 `IndexManager` 中记录 **key → 该帧在 WAL 中的 offset**；`get` 可按 key 从 WAL **随机读（pread）** 取出 value 字节串。这是 **日志型 KV/大 value** 语义。  
 - **`HNSWIndex`**：在内存中维护 **图结构**与向量副本，支持 `save`/`load` 到 **`Options::hnsw_path`** 指定的文件；与 WAL 帧格式是 **另一条持久化路径**。
 
-**C API**（`lumina_add_vector`）在内存里同时更新 **HNSW** 与 **`payloads` 哈希表**；payload **未**写入本文件的 `StorageEngine` WAL。面试时应诚实说明：**原型中多条路径并存**，完整产品需统一 **事务边界** 与 **崩溃一致性** 模型。
+**v2 统一路径**：`Collection::add(id, vec, payload, scalars)` → 编码 `EntryMeta` → WAL `VectorPutV2` → HNSW `add_item` → FilterIndex 更新。**payload 与过滤字段随 WAL 持久化**（v1 的「C API 旁路内存哈希表、payload 不落盘」已在 v2 移除，统一为单一路径 + 崩溃一致性）。
 
 ---
 
@@ -177,12 +177,14 @@ LuminaStore 是一个用 **C++20** 编写的 **高性能持久化向量存储引
 
 **答：**  
 
-1. 校验指针、**禁止 duplicate id（重复主键）**。  
+1. 校验指针、**禁止 duplicate id（重复主键）**；可注入距离函数（L2/IP/Cosine/量化距离）。  
 2. 按指数分布采样 **随机层 `new_layer`**（实现用 `ml = 1/log(max(M,2))` 与 `-log(U)*ml`）。  
 3. 若图为空，新点成为 **entry_point（入口点）**。  
 4. 否则从当前 **max_layer** 向下 **greedy（贪心）** 下降到 `new_layer`，每层用 `search_layer` 找近邻。  
-5. 在 `new_layer..0` 上连接双向边，并在边数过多时按距离 **prune（剪枝）** 到 `max_m`。  
+5. 在 `new_layer..0` 上连接双向边，并用**启发式（多样化）邻居选择** `select_neighbors_heuristic` 选邻居——候选只有「不比已选邻居更靠近中心」才入选，排除近亲簇拥；反向边溢出时同样重选。  
 6. 若 `new_layer` 超过原 `max_layer`，更新全局入口与高度。
+
+**删除**：标记删除（tombstone），不物理断边；搜索跳过已删节点；删除入口点时自动选最高层活跃节点替代。**更新**：摘除旧边 → 重置层数 → 重新插入。删除位随 `save/load` 持久化。
 
 向量在节点内使用 **`AlignedFloatVector`** 存储，距离调用 **`VectorMath::l2_distance`**（经 **runtime dispatch**）。
 
@@ -191,7 +193,8 @@ LuminaStore 是一个用 **C++20** 编写的 **高性能持久化向量存储引
 ### Q5.3 `save` / `load` 持久化了什么？
 
 **答：**  
-将 **图拓扑与节点向量** 序列化到磁盘文件（具体二进制布局以 `hnsw_index.cpp` 为准），用于进程重启后恢复 **ANN 结构**。与 WAL 的 **操作日志** 是不同子系统；统一容灾需定义 **checkpoint（检查点）** 或 **单一真相源** 策略（当前文档级「待演进」项）。
+v2 文件格式带 magic `LMHN` + 版本号，序列化**图拓扑 + 节点向量 + 删除位**。  
+**生产恢复路径不依赖 HNSW 文件**：`Collection::open()` 通过 **StorageEngine 快照 + WAL 增量重放**重建索引（见 §11 快照问答），HNSW save/load 用于离线导出/备份。
 
 ---
 
@@ -240,12 +243,18 @@ NEON 路径在可用时使用对齐提示。
 ### Q7.1 暴露了哪些符号？线程安全吗？
 
 **答：**  
-`extern "C"`：`lumina_init(dim)`、`lumina_add_vector(id, vector, dim, payload_text)`、`lumina_search_vector(query, dim, top_k)`、`lumina_free_string(ptr)`。  
-全程在全局 **`mutex`** 下操作；返回的 JSON 字符串由 **`malloc`** 分配，需 **`lumina_free_string`** 释放，属于 **C 侧所有权约定（ownership）**。
+v2 改为**句柄式** API（v1 的 `lumina_init` 全局单例已废弃）：
+
+- 生命周期：`lumina_open(dir, dim, metric)` / `lumina_close(h)` —— 返回句柄，支持**多实例**；
+- 写入：`lumina_add` / `lumina_add_batch`（numpy 批量）/ `lumina_remove`；
+- 读取：`lumina_search` / `lumina_search_batch` / `lumina_get`；
+- 维护：`lumina_snapshot` / `lumina_stats`。
+
+每个句柄内部有 mutex 保护搜索/读取；返回的 JSON 字符串由 `malloc` 分配，需 `lumina_free_string` 释放（**C 侧所有权约定**）。
 
 ---
 
-### Q7.2 `lumina_search_vector` 返回的 JSON 含哪些字段？
+### Q7.2 `lumina_search` 返回的 JSON 含哪些字段？
 
 **答：**  
 `results` 数组中每项含 **`id`**、**`distance`**（L2 语义下的距离值）、**`payload`**（经 **JSON escape** 的文本）。错误路径返回带 **`error`** 字段的 JSON。
@@ -271,8 +280,10 @@ ctest --test-dir build --output-on-failure
 ### Q8.2 Benchmark 二进制测什么？
 
 **答：**  
-- **`storage_bench`**：顺序写吞吐、随机读延迟等存储路径。  
-- **`vector_bench`**：**naive vs SIMD dispatch** 的 L2、对齐/非对齐输入、**HNSW top-k** 查询延迟。
+- **`storage_bench` / `vector_bench`**：存储路径 + naive vs SIMD dispatch 的距离 / HNSW top-k 延迟；  
+- **`quant_bench`**：全精度 vs SQ8/Binary/PQ 距离吞吐（含 code-code 热路径）与量化 top-k 召回；  
+- **`filter_bench`**：in-filter / post-filter 在不同选择性下的 recall 与延迟；  
+- **`ann_bench`**（tools/）：recall@10–QPS 前沿曲线（可加载真实 fvecs 数据）。
 
 ---
 
@@ -288,13 +299,49 @@ ctest --test-dir build --output-on-failure
 ### Q9.2 下一步可演进方向？（结合 `PROJECT_NARRATIVE.md`）
 
 **答：**  
-**CI 矩阵**（GCC/Clang/MSVC、ARM64）；**`LUMINA_PREFER_AVX512`** 等策略开关；更大规模 **recall–latency 曲线** 报告；**WAL / HNSW 文件格式版本迁移手册**；**Compaction**；**快照（snapshot）**；与对象存储结合的 **冷备** 等。
+**已落地**（v2）：快照 + 增量恢复、量化（SQ8/Binary/PQ）、过滤检索（in/post）、Python 绑定、recall-QPS 评测工具、SIMD 量化内核。  
+**待演进**：磁盘索引（图上 RAM + 向量在盘，DiskANN 简化版）；完整量化搜索链路（图存码 + 精排）；CI 矩阵；格式版本迁移手册；WAL 轮转/compaction。
 
 ---
 
 ## 10. 速记卡片（30 秒电梯陈述）
 
-> 「LuminaStore 是 C++20 的向量引擎 **原型**：**append-only WAL** + **帧 CRC** + **尾部 ftruncate 修复** 保证崩溃恢复语义清晰；**内存 key→offset 索引** + **pread** 做读取；**HNSW** 提供 **ANN** 检索，**SIMD 运行时派发**（AVX2/AVX-512/NEON）+ **64B 对齐** 优化距离计算；配套 **GoogleTest / Benchmark** 与 **C API** 方便和 Python RAG 链路集成。」
+> 「LuminaStore 是 C++20 的**嵌入式向量数据库**：append-only **WAL**（帧 CRC + 尾损坏修复）+ **快照/MANIFEST 增量恢复** 保证崩溃一致性；**HNSW**（启发式邻居选择 + 删除/更新）+ **量化**（SQ8/Binary/PQ，内存 4x-32x）+ **bitmap 过滤**（in/post 双模式）覆盖检索核心挑战；**SIMD 距离内核**（NEON/AVX2/AVX-512）与 **SIMD 量化距离**（code-code 快于全精度 2-4x）；句柄式 **C API** + **Python 绑定**；12 组单测 + 4 组基准 + recall-QPS 评测。」
+
+---
+
+## 11. v2 新特性问答（Collection / 快照 / 量化 / 过滤）
+
+### Q11.1 `Collection` 的写入与恢复流程？
+
+**答：**  
+写入：`add(id, vec, payload, scalars)` → 编码 `EntryMeta`（vec+payload+过滤字段）→ WAL `VectorPutV2` → HNSW `add_item` → FilterIndex 更新。  
+恢复：`open()` → StorageEngine（快照 + 水位后增量重放 WAL，重建 key→offset）→ 遍历活跃条目重建 HNSW 图与 FilterIndex。**kill -9 后重启数据一致**（WAL 是权威，图可重建）。
+
+### Q11.2 快照为什么能加速启动？水位如何保证安全？
+
+**答：**  
+快照 = 当时活跃 key→offset 表 + WAL 水位（字节偏移）。启动时加载快照 + 只重放水位之后的 WAL，避免全量重放。**水位安全**：`snapshot()` 先 `fsync(WAL)` 再写快照，保证水位 ≤ 已落盘数据；快照写临时文件 + fsync + rename，MANIFEST 更新同样原子（tmp + rename + fsync）。
+
+### Q11.3 三种量化器怎么选？距离语义是什么？
+
+**答：**  
+- **SQ8**（4x）：全局 min/max 归一化到 uint8，距离 = `scale²·Σ(a-b)²`（int 差平方，SIMD 精确加速），适合 L2；  
+- **Binary**（32x）：每 float 符号位 1 bit，Hamming/popcount，适合 cosine/IP 的 sign-embedding；  
+- **PQ**（8-32x）：k-means 子空间码本 + ADC 查表，压缩率高但训练成本最高。  
+代码间距离（图遍历热路径）用 SIMD 内核，比全精度 L2 快 2-4x；码-查询距离含一次查询量化开销。
+
+### Q11.4 in-filter 与 post-filter 的代价差异？
+
+**答：**  
+- **in-filter**：遍历时候选**入结果集**才检查谓词（展开队列不过滤）——结果恒满足谓词、无需重试；低选择性时需放大 ef 补足候选池；  
+- **post-filter**：普通大 ef 搜索 → 过滤 → 不足 k 翻倍 ef 重试——实现简单，但高选择性（命中少）时重试放大延迟。  
+实测：1%/20%/50% 选择性下两者 recall@10=1.0（ef 足够时），in-filter 延迟更低。
+
+### Q11.5 并发模型是什么？为什么 update 持写锁？
+
+**答：**  
+写路径（add/update/remove）串行（Collection write_mutex）；HNSW 内部 label 条带锁 + node 条带锁 + 读写锁（搜索持 shared，结构变更持 unique）；搜索与搜索并发。update 全程持写锁，保证「摘边→重置→重插」原子性——早期版本在并发下邻居 vector 元数据损坏（ASAN 定位为 prune 造成的图不对称 + 残留悬空边），现已通过「搜索过滤低层节点 + connect 防御性检查」双重修复。
 
 ---
 
