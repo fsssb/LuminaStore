@@ -51,6 +51,7 @@ include_directories(include)
 file(GLOB_RECURSE LUMINA_SOURCES
     src/common/*.cpp
     src/engine/*.cpp
+    src/index/*.cpp
     src/storage/*.cpp
 )
 file(GLOB LUMINA_VECTOR_BASE src/vector/*.cpp)
