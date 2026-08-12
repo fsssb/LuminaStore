@@ -110,6 +110,21 @@ static void BM_Sq8Distance(benchmark::State& state) {
 }
 BENCHMARK(BM_Sq8Distance);
 
+// Code-to-code distance: the hot path once queries are pre-quantized (graph
+// traversal over stored codes). Pure integer SIMD, no per-call quantization.
+static void BM_Sq8CodeCode(benchmark::State& state) {
+    const auto& d = data();
+    float sink = 0.0F;
+    for (auto _ : state) {
+        for (size_t i = 1; i <= 1000; ++i) {
+            sink += d.sq8->distance(d.sq8_codes[i - 1], d.sq8_codes[i % 1000]);
+        }
+    }
+    benchmark::DoNotOptimize(sink);
+    state.SetItemsProcessed(state.iterations() * 1000);
+}
+BENCHMARK(BM_Sq8CodeCode);
+
 static void BM_BinaryDistance(benchmark::State& state) {
     const auto& d = data();
     float sink = 0.0F;
@@ -122,6 +137,19 @@ static void BM_BinaryDistance(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * 1000);
 }
 BENCHMARK(BM_BinaryDistance);
+
+static void BM_BinaryCodeCode(benchmark::State& state) {
+    const auto& d = data();
+    float sink = 0.0F;
+    for (auto _ : state) {
+        for (size_t i = 1; i <= 1000; ++i) {
+            sink += d.bin->distance(d.bin_codes[i - 1], d.bin_codes[i % 1000]);
+        }
+    }
+    benchmark::DoNotOptimize(sink);
+    state.SetItemsProcessed(state.iterations() * 1000);
+}
+BENCHMARK(BM_BinaryCodeCode);
 
 static void BM_PqDistance(benchmark::State& state) {
     const auto& d = data();
