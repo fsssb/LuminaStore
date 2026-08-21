@@ -210,6 +210,7 @@
 > - 设计 WAL 持久化（CRC32、大端格式、group commit、尾损坏自动修复）+ MANIFEST 快照与增量重放，kill -9 后重启数据一致
 > - 实现过滤检索双模式（in-filter / post-filter），谓词预计算为 bitmap 位图，1%-50% 选择性下 recall@10=1.0
 > - 实现 SQ8/Binary/PQ 量化（内存 4x-32x 压缩）+ SIMD 距离内核，量化码间距离快于全精度 L2 2-4x，top-10 召回与全精度一致
+> - 嵌入式实时检索场景对标：同 recall 下延迟与 SIMD 库 usearch 相当（p50 325 vs 342 us @ recall≈0.99）、显著优于嵌入式数据库 Chroma（2-3x，988 vs 325 us）；构建经参数与启发式裁剪优化提速 ~54%（64.9s→29.7s）
 > - 提供句柄式 C API 与 Python 绑定（numpy 批量 add/search），12 组单元测试 + 4 组 benchmark + recall-QPS 评测工具全绿
 
 ### 面试可能问题清单（提前准备）
