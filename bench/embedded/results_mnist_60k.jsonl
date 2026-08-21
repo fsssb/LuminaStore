@@ -1,0 +1,8 @@
+{"build_s": 28.32, "dim": 784, "ef": 100, "engine": "LuminaStore", "n": 60000, "p50_us": 325.1, "p99_us": 796.3, "qps": 2690.1, "recall": 0.9875, "rss_mb": 1258.9}
+{"build_s": 28.32, "dim": 784, "ef": 200, "engine": "LuminaStore", "n": 60000, "p50_us": 442.3, "p99_us": 564.5, "qps": 2289.4, "recall": 0.9945, "rss_mb": 1258.9}
+{"build_s": 28.32, "dim": 784, "ef": 400, "engine": "LuminaStore", "n": 60000, "p50_us": 766.2, "p99_us": 988.0, "qps": 1326.1, "recall": 0.997, "rss_mb": 1259.0}
+{"build_s": 17.34, "dim": 784, "ef": 50, "engine": "usearch", "n": 60000, "p50_us": 341.7, "p99_us": 563.8, "qps": 2876.6, "recall": 0.992, "rss_mb": 1280.2}
+{"build_s": 17.34, "dim": 784, "ef": 100, "engine": "usearch", "n": 60000, "p50_us": 343.2, "p99_us": 612.4, "qps": 2797.8, "recall": 0.9945, "rss_mb": 1280.2}
+{"build_s": 17.34, "dim": 784, "ef": 200, "engine": "usearch", "n": 60000, "p50_us": 628.6, "p99_us": 1353.1, "qps": 1488.7, "recall": 0.9955, "rss_mb": 1280.2}
+{"build_s": 17.34, "dim": 784, "ef": 400, "engine": "usearch", "n": 60000, "p50_us": 731.3, "p99_us": 1269.7, "qps": 1369.7, "recall": 0.9955, "rss_mb": 1280.2}
+{"build_s": 35.58, "dim": 784, "ef": 0, "engine": "Chroma", "n": 60000, "p50_us": 988.1, "p99_us": 1614.5, "qps": 976.7, "recall": 0.9985, "rss_mb": 1265.4}

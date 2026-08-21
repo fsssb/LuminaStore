@@ -151,7 +151,7 @@ int lumina_remove(void* h, uint64_t id) {
 
 // ---- reads ----
 
-char* lumina_search(void* h, const float* query, int dim, int top_k) {
+char* lumina_search(void* h, const float* query, int dim, int top_k, int ef) {
     Handle* handle = lookup(h);
     if (handle == nullptr || query == nullptr || dim <= 0) {
         return alloc_c_string("{\"error\":\"bad args\",\"results\":[]}");
@@ -159,7 +159,8 @@ char* lumina_search(void* h, const float* query, int dim, int top_k) {
     std::lock_guard<std::mutex> lock(handle->mutex);
 
     const size_t k = static_cast<size_t>(std::max(1, top_k));
-    const auto hits = handle->collection->search(query, k, {.ef_search = 200});
+    const size_t ef_search = static_cast<size_t>(std::max(1, ef));
+    const auto hits = handle->collection->search(query, k, {.ef_search = ef_search});
 
     std::string json = "{\"results\":[";
     bool first = true;
@@ -201,7 +202,7 @@ int lumina_get(void* h, uint64_t id, char** payload, int* out_len) {
 
 // Batch search: `queries` holds n vectors of `dim` floats each (row-major).
 // Returns a JSON document: {"results":[[{...},{...}], ...]}.
-char* lumina_search_batch(void* h, const float* queries, int n, int dim, int top_k) {
+char* lumina_search_batch(void* h, const float* queries, int n, int dim, int top_k, int ef) {
     Handle* handle = lookup(h);
     if (handle == nullptr || queries == nullptr || n <= 0 || dim <= 0) {
         return alloc_c_string("{\"error\":\"bad args\",\"results\":[]}");
@@ -209,10 +210,11 @@ char* lumina_search_batch(void* h, const float* queries, int n, int dim, int top
     std::lock_guard<std::mutex> lock(handle->mutex);
 
     const size_t k = static_cast<size_t>(std::max(1, top_k));
+    const size_t ef_search = static_cast<size_t>(std::max(1, ef));
     std::string json = "{\"results\":[";
     for (int i = 0; i < n; ++i) {
         const float* q = queries + static_cast<size_t>(i) * dim;
-        const auto hits = handle->collection->search(q, k, {.ef_search = 200});
+        const auto hits = handle->collection->search(q, k, {.ef_search = ef_search});
         if (i > 0) {
             json += ",";
         }

@@ -13,3 +13,5 @@ cmake_install.cmake
 Makefile
 CTestTestfile.cmake
 build-asan/
+bench/embedded/.venv/
+bench/embedded/qdrant

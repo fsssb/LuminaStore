@@ -73,11 +73,11 @@ _lib.lumina_remove.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
 
 _lib.lumina_search.restype = ctypes.c_void_p
 _lib.lumina_search.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_float),
-                               ctypes.c_int, ctypes.c_int]
+                               ctypes.c_int, ctypes.c_int, ctypes.c_int]
 
 _lib.lumina_search_batch.restype = ctypes.c_void_p
 _lib.lumina_search_batch.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_float),
-                                     ctypes.c_int, ctypes.c_int, ctypes.c_int]
+                                     ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
 
 _lib.lumina_get.restype = ctypes.c_int
 _lib.lumina_get.argtypes = [ctypes.c_void_p, ctypes.c_uint64,
@@ -174,7 +174,7 @@ class Collection:
         if arr.shape[1] != self.dim:
             raise ValueError(f"dim mismatch: expected {self.dim}, got {arr.shape[1]}")
         n = arr.shape[0]
-        raw = _lib.lumina_search_batch(self._h, ptr, n, self.dim, int(top_k))
+        raw = _lib.lumina_search_batch(self._h, ptr, n, self.dim, int(top_k), int(ef))
         text = ctypes.string_at(raw).decode()
         _lib.lumina_free_string(raw)
         data = json.loads(text)

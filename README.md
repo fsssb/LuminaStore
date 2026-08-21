@@ -1,17 +1,24 @@
 # LuminaStore
 
-LuminaStore is a high-performance embedded vector storage engine in C++20:
-an HNSW approximate nearest neighbour index fused with a WAL-backed storage
-layer (payload + scalar filter fields persist across restarts).
+LuminaStore is a high-performance **embedded vector database** for real-time
+retrieval scenarios (local / edge / desktop / single-machine apps): an HNSW
+approximate nearest neighbour index fused with a WAL-backed storage layer
+(payload + scalar filter fields persist across restarts).
 
+- **Embedded-first**: zero-deploy, in-process, microsecond-latency (vs
+  server-side engines that pay network + process overhead)
 - **Storage**: append-only WAL (CRC32, big-endian, tail repair), snapshot +
   manifest incremental recovery
 - **Index**: HNSW with heuristic neighbour selection, tombstone delete/update,
   injectable metrics (L2 / IP / Cosine)
-- **Quantization**: SQ8 / Binary / PQ with ADC distances (4x–32x memory cuts)
+- **Quantization**: SQ8 / Binary / PQ with SIMD kernels (4x–32x memory cuts,
+  code-to-code distance 2-4x faster than full-precision L2)
 - **Filtering**: bitmap filter index, in-filter / post-filter search modes
 - **API**: handle-based C API, Python (ctypes + numpy) bindings, plus gtest /
   google-benchmark suites
+
+Embedded-scenario comparison vs Chroma / usearch / Qdrant:
+see [docs/embedded_benchmarks.md](docs/embedded_benchmarks.md).
 
 ## Build
 
