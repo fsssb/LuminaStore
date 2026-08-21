@@ -1,0 +1,9 @@
+{"build_s": 36.44, "dim": 784, "ef": 50, "engine": "LuminaStore", "n": 60000, "p50_us": 1939.0, "p99_us": 3336.5, "qps": 512.8, "recall": 0.974, "rss_mb": 1169.9}
+{"build_s": 36.44, "dim": 784, "ef": 100, "engine": "LuminaStore", "n": 60000, "p50_us": 378.6, "p99_us": 735.2, "qps": 2496.9, "recall": 0.987, "rss_mb": 1170.9}
+{"build_s": 36.44, "dim": 784, "ef": 200, "engine": "LuminaStore", "n": 60000, "p50_us": 499.6, "p99_us": 812.5, "qps": 1939.1, "recall": 0.995, "rss_mb": 1171.1}
+{"build_s": 36.44, "dim": 784, "ef": 400, "engine": "LuminaStore", "n": 60000, "p50_us": 853.7, "p99_us": 1151.9, "qps": 1181.6, "recall": 0.999, "rss_mb": 1171.1}
+{"build_s": 17.17, "dim": 784, "ef": 50, "engine": "usearch", "n": 60000, "p50_us": 442.5, "p99_us": 948.1, "qps": 2117.9, "recall": 0.9905, "rss_mb": 1221.1}
+{"build_s": 17.17, "dim": 784, "ef": 100, "engine": "usearch", "n": 60000, "p50_us": 605.8, "p99_us": 1185.2, "qps": 1595.5, "recall": 0.9945, "rss_mb": 1221.3}
+{"build_s": 17.17, "dim": 784, "ef": 200, "engine": "usearch", "n": 60000, "p50_us": 707.8, "p99_us": 1860.2, "qps": 1318.4, "recall": 0.9955, "rss_mb": 1221.3}
+{"build_s": 17.17, "dim": 784, "ef": 400, "engine": "usearch", "n": 60000, "p50_us": 1129.9, "p99_us": 2731.8, "qps": 825.0, "recall": 0.9955, "rss_mb": 1221.3}
+{"build_s": 37.91, "dim": 784, "ef": 0, "engine": "Chroma", "n": 60000, "p50_us": 1485.0, "p99_us": 16549.1, "qps": 433.4, "recall": 0.9985, "rss_mb": 1129.4}
