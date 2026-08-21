@@ -111,19 +111,21 @@ def main():
     build_s = time.perf_counter() - t0
     assert rc == 0, f"add_batch rc={rc}"
 
+    # Compute ground truth only after all latency measurements: the float64
+    # scratch arrays would otherwise skew the first rows (memory pressure).
     truth = brute_truth(base, queries, 10)
 
-    # Release the float64 truth scratch memory and settle before timing.
-    import gc
-
-    gc.collect()
-
-    # Global warmup: JIT/page-cache effects settle before the first ef row.
-    wq = queries[:1].ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-    for _ in range(5):
-        _search_one(lib, h, wq, dim, 10, efs[-1])
+    # Compute ground truth only after all latency measurements: the float64
+    # scratch arrays would otherwise skew the first rows (memory pressure).
+    truth = brute_truth(base, queries, 10)
 
     for ef in efs:
+        # Warm up the whole query set for this ef: the first execution of each
+        # query (ctypes/JSON cold path) skews the first measured row.
+        for qi in range(queries.shape[0]):
+            wqp = queries[qi : qi + 1].ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+            _search_one(lib, h, wqp, dim, 10, ef)
+
         lat = []
         ids_matrix = np.zeros((queries.shape[0], 10), dtype=np.int64)
         for qi in range(queries.shape[0]):

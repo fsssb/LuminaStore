@@ -43,6 +43,10 @@ def main():
 
     for ef in efs:
         index.expansion_search = ef
+        # Warm up the whole query set for this ef (first-execution skew).
+        for qi in range(queries.shape[0]):
+            index.search(queries[qi], 10)
+
         lat = []
         ids_matrix = np.zeros((queries.shape[0], 10), dtype=np.int64)
         for qi in range(queries.shape[0]):

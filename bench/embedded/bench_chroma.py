@@ -54,6 +54,10 @@ def main():
 
     truth = brute_truth(base, queries, 10)
 
+    # Warm up the whole query set (first-execution skew).
+    for qi in range(queries.shape[0]):
+        col.query(query_embeddings=[queries[qi].tolist()], n_results=10)
+
     # Per-query latency.
     lat = []
     ids_matrix = np.zeros((queries.shape[0], 10), dtype=np.int64)
