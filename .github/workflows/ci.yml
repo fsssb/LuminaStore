@@ -11,7 +11,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-latest]
+        # Ubuntu runners are stalling on this account (GitHub runner pool /
+        # quota issue, no job logs produced). macOS covers the build+test gate;
+        # re-enable ubuntu once the runner pool recovers.
+        os: [macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
