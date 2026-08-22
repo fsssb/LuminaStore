@@ -20,7 +20,52 @@ approximate nearest neighbour index fused with a WAL-backed storage layer
 Embedded-scenario comparison vs Chroma / usearch / Qdrant:
 see [docs/embedded_benchmarks.md](docs/embedded_benchmarks.md).
 
+Real retrieval-quality evaluation on the standard **BEIR (SciFact)** benchmark
+(real documents + human-annotated relevance): NDCG@10 within 0.2pp of Chroma
+while search latency is 2.4x faster — see
+[docs/scenario_evaluation.md](docs/scenario_evaluation.md).
+
 ## Build
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph API["API layer"]
+        C["C API (cpp_engine)"]
+        PY["Python (ctypes + numpy)"]
+    end
+    subgraph Engine["Query execution (engine/)"]
+        COL["Collection"]
+        PL["Search pipeline"]
+    end
+    subgraph Index["Index layer (index/)"]
+        HNSW["HNSW (heuristic selection)"]
+        QUANT["Quantizer (SQ8/Binary/PQ)"]
+        FILTER["FilterIndex (bitmap)"]
+    end
+    subgraph Storage["Storage layer (storage/)"]
+        WAL["WAL (CRC, group commit)"]
+        SNAP["Snapshot + MANIFEST"]
+    end
+    subgraph Compute["Compute layer (vector/)"]
+        SIMD["SIMD kernels (NEON/AVX2/AVX512)"]
+        QDIST["Quantized distance"]
+    end
+
+    C --> COL
+    PY --> COL
+    COL --> PL
+    PL --> HNSW
+    PL --> FILTER
+    HNSW --> QUANT
+    COL --> WAL
+    WAL --> SNAP
+    HNSW --> QDIST
+    QUANT --> QDIST
+    QDIST --> SIMD
+```
+
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
