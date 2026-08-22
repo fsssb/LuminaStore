@@ -1,6 +1,7 @@
 #include "lumina/vector/quantized_distance.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
