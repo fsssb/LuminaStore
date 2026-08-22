@@ -169,9 +169,12 @@ def main():
     if args.engine == "lumina":
         lib, h, build_s = index_lumina(doc_vecs, doc_vecs.shape[1])
         results, lat = search_lumina(lib, h, q_vecs, doc_vecs.shape[1], 100, args.ef)
+        # Engine ids are sequential indices; map back to the corpus doc ids.
+        results = {qid: [doc_ids[int(seq)] for seq in ranked] for qid, ranked in results.items()}
     else:
         col, build_s = index_chroma(doc_vecs)
         results, lat = search_chroma(col, q_vecs, qids, 100)
+        results = {qid: [doc_ids[int(seq)] for seq in ranked] for qid, ranked in results.items()}
 
     lat = np.array(lat)
     metrics = evaluate(results, qrels, k=10)

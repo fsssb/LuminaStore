@@ -16,7 +16,7 @@ import numpy as np
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE)
-from load_beir import load_corpus, load_queries
+from load_beir import load_corpus, load_queries, load_qrels
 
 MODEL = os.path.join(BASE, "model")
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
@@ -54,9 +54,13 @@ def embed_texts(texts, batch=64):
 def main():
     docs = load_corpus(os.path.join(BASE, "data", "scifact"))
     queries = load_queries(os.path.join(BASE, "data", "scifact"))
+    qrels = load_qrels(os.path.join(BASE, "data", "scifact"))
     doc_texts = [f"{d[1]}. {d[2]}" for d in docs]
-    q_texts = [QUERY_PREFIX + q[1] for q in queries]
-    print(f"corpus={len(doc_texts)} queries={len(q_texts)}", flush=True)
+    # Only embed the test queries that have ground truth (matches run_beir).
+    test_qids = set(qrels.keys())
+    kept = [(qid, text) for qid, text in queries if qid in test_qids]
+    q_texts = [QUERY_PREFIX + q[1] for q in kept]
+    print(f"corpus={len(doc_texts)} test_queries={len(kept)}", flush=True)
 
     os.makedirs(os.path.join(BASE, "cache"), exist_ok=True)
     t0 = time.perf_counter()

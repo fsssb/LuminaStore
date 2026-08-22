@@ -36,7 +36,7 @@
 |---|---|---|
 | 项目做什么？ | 嵌入式向量数据库 | 定位：服务型太重伤不到本地场景 |
 | 检索性能？ | 四引擎同机对比 | MNIST 60k：p50 325us（Chroma 988us、Qdrant 1640us） |
-| 场景有效吗？ | BEIR 标准评测 | SciFact NDCG@10/MRR@10（见 docs/scenario_evaluation.md） |
+| 场景有效吗？ | BEIR 标准评测 | SciFact：NDCG@10=0.704（Chroma 0.706，差 0.2pp），检索 p50 713us vs 1737us（快 2.4x） |
 | 崩溃恢复？ | WAL + 快照 | kill -9 循环 6/6 零丢失 |
 | 并发？ | 写读并发 | 多线程压力：已知向量 recall@1=1.0 |
 | 量化？ | SQ8/Binary/PQ + SIMD | 内存 4x-32x，code-code 距离快 2-4x，recall 保持 |

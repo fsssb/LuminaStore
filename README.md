@@ -20,6 +20,11 @@ approximate nearest neighbour index fused with a WAL-backed storage layer
 Embedded-scenario comparison vs Chroma / usearch / Qdrant:
 see [docs/embedded_benchmarks.md](docs/embedded_benchmarks.md).
 
+Real retrieval-quality evaluation on the standard **BEIR (SciFact)** benchmark
+(real documents + human-annotated relevance): NDCG@10 within 0.2pp of Chroma
+while search latency is 2.4x faster — see
+[docs/scenario_evaluation.md](docs/scenario_evaluation.md).
+
 ## Build
 
 ## Architecture
