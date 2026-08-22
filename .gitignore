@@ -18,3 +18,5 @@ bench/embedded/qdrant
 bench/embedded/qdrant
 bench/embedded/qdrant-arm64.tar.gz
 bench/embedded/storage/
+bench/beir/model/
+bench/beir/data/

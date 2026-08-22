@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+    branches: [main, v2]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (Release)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Configure (ASAN, Debug)
+        run: cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DLUMINA_ENABLE_ASAN=ON
+
+      - name: Build (ASAN)
+        run: cmake --build build-asan -j
+
+      - name: Test (ASAN)
+        run: ctest --test-dir build-asan --output-on-failure
