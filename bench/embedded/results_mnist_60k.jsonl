@@ -6,3 +6,7 @@
 {"build_s": 17.34, "dim": 784, "ef": 200, "engine": "usearch", "n": 60000, "p50_us": 628.6, "p99_us": 1353.1, "qps": 1488.7, "recall": 0.9955, "rss_mb": 1280.2}
 {"build_s": 17.34, "dim": 784, "ef": 400, "engine": "usearch", "n": 60000, "p50_us": 731.3, "p99_us": 1269.7, "qps": 1369.7, "recall": 0.9955, "rss_mb": 1280.2}
 {"build_s": 35.58, "dim": 784, "ef": 0, "engine": "Chroma", "n": 60000, "p50_us": 988.1, "p99_us": 1614.5, "qps": 976.7, "recall": 0.9985, "rss_mb": 1265.4}
+{"build_s": 29.12, "dim": 784, "ef": 50, "engine": "Qdrant", "n": 60000, "p50_us": 1640.4, "p99_us": 4938.1, "qps": 517.2, "recall": 0.9975, "rss_mb": 0.0}
+{"build_s": 29.12, "dim": 784, "ef": 100, "engine": "Qdrant", "n": 60000, "p50_us": 1690.8, "p99_us": 1975.9, "qps": 588.9, "recall": 0.998, "rss_mb": 0.0}
+{"build_s": 29.12, "dim": 784, "ef": 200, "engine": "Qdrant", "n": 60000, "p50_us": 2023.5, "p99_us": 2647.6, "qps": 489.9, "recall": 0.999, "rss_mb": 0.0}
+{"build_s": 29.12, "dim": 784, "ef": 400, "engine": "Qdrant", "n": 60000, "p50_us": 2511.0, "p99_us": 3027.0, "qps": 403.3, "recall": 1.0, "rss_mb": 0.0}
