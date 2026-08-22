@@ -61,6 +61,17 @@ def load_lib():
     ]
     lib.lumina_free_string.restype = None
     lib.lumina_free_string.argtypes = [ctypes.c_void_p]
+    lib.lumina_get.restype = ctypes.c_int
+    lib.lumina_get.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint64,
+        ctypes.POINTER(ctypes.c_char_p),
+        ctypes.POINTER(ctypes.c_int),
+    ]
+    lib.lumina_stats.restype = ctypes.c_void_p
+    lib.lumina_stats.argtypes = [ctypes.c_void_p]
+    lib.lumina_snapshot.restype = ctypes.c_int
+    lib.lumina_snapshot.argtypes = [ctypes.c_void_p]
     _LIB = lib
     return lib
 
