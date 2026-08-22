@@ -29,7 +29,7 @@ MODEL = os.path.join(BASE, "model")
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
 
-def embed(model, texts, batch=64):
+def embed(model, texts, batch=128):
     """BGE query prefix for queries, none for corpus (BGE docs)."""
     out = []
     for i in range(0, len(texts), batch):
@@ -123,6 +123,12 @@ def main():
     ap.add_argument("--ef", type=int, default=200)
     args = ap.parse_args()
 
+    import os
+
+    import torch
+
+    torch.set_num_threads(max(1, os.cpu_count() or 4))
+
     from sentence_transformers import SentenceTransformer
 
     docs = load_corpus(DATA)
@@ -143,11 +149,22 @@ def main():
         doc_texts = doc_texts[: args.limit]
         doc_ids = doc_ids[: args.limit]
 
-    model = SentenceTransformer(MODEL)
-    t0 = time.perf_counter()
-    doc_vecs = embed(model, doc_texts)
-    q_vecs = embed(model, qtexts)
-    print(f"embedding: {time.perf_counter() - t0:.1f}s dim={doc_vecs.shape[1]}")
+    cache_dir = os.path.join(BASE, "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    doc_cache = os.path.join(cache_dir, "doc_vecs.npy")
+    q_cache = os.path.join(cache_dir, "q_vecs.npy")
+    if os.path.exists(doc_cache) and os.path.exists(q_cache):
+        doc_vecs = np.load(doc_cache)
+        q_vecs = np.load(q_cache)
+        print(f"embedding: loaded from cache dim={doc_vecs.shape[1]}")
+    else:
+        model = SentenceTransformer(MODEL)
+        t0 = time.perf_counter()
+        doc_vecs = embed(model, doc_texts)
+        q_vecs = embed(model, qtexts)
+        print(f"embedding: {time.perf_counter() - t0:.1f}s dim={doc_vecs.shape[1]}")
+        np.save(doc_cache, doc_vecs)
+        np.save(q_cache, q_vecs)
 
     if args.engine == "lumina":
         lib, h, build_s = index_lumina(doc_vecs, doc_vecs.shape[1])
